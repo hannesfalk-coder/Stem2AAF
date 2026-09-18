@@ -23,6 +23,7 @@ the window is dismissed with its close button.
 """
 
 import json
+import os
 
 import objc
 from AppKit import (
@@ -53,8 +54,7 @@ class _SettingsPanel(NSPanel):
 
 _W, _H = 680, 510   # panel width × height (title bar + content + footer)
 
-VERSION = "1.0.2"
-BUILD   = "42"
+from version import VERSION, BUILD
 
 # Single source of truth: the converter's keyword table is what actually runs
 # at conversion time, so the UI derives its defaults from it rather than
@@ -117,6 +117,7 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
   justify-content:center;flex-shrink:0;font-size:13px;background:var(--bg-2)}
 .sb-row.active .sb-icon{background:rgba(0,0,0,.06)}
 .sb-name{font-size:13px;font-weight:500;color:var(--t1)}
+.change-btn.danger{color:var(--red)}
 .sb-row.active .sb-name{color:var(--t1)}
 
 /* ── Detail pane ── */
@@ -344,9 +345,27 @@ function generalHTML() {
       <div class="sr sr-toggle">
         <div class="sr-text" style="flex:1">
           <div class="sr-title">Auto-convert when stems arrive</div>
-          <div class="sr-desc">Automatically build an AAF whenever new stems appear in the Watch Folder — no manual trigger needed.</div>
+          <div class="sr-desc">Build an AAF once the number of waiting stems has held steady for 12 seconds. A batch where any file is still being written is never converted — you'll get an error instead of an AAF missing tracks.</div>
         </div>
         <button class="tog${S.auto_convert?' on':''}" onclick="S.auto_convert=!S.auto_convert;this.classList.toggle('on',S.auto_convert);autoSave()"></button>
+      </div>
+    </div>
+
+    <div class="sec-label">Application</div>
+    <div class="sg">
+      <div class="sr sr-toggle">
+        <div class="sr-text" style="flex:1">
+          <div class="sr-title">Launch at login</div>
+          <div class="sr-desc">Start Stem2AAF automatically when you log in, so the menu bar icon is always there.</div>
+        </div>
+        <button class="tog${S.launch_at_login?' on':''}" onclick="S.launch_at_login=!S.launch_at_login;this.classList.toggle('on',S.launch_at_login);autoSave()"></button>
+      </div>
+      <div class="sr">
+        <div class="sr-text">
+          <div class="sr-title">Uninstall Stem2AAF</div>
+          <div class="sr-desc">Removes the app, its settings and its login item. Your project folder is left alone.</div>
+        </div>
+        <button class="change-btn danger" onclick="post({action:'uninstall'})">Uninstall…</button>
       </div>
     </div>`;
 }
@@ -537,10 +556,7 @@ function aboutHTML() {
       <div class="app-name">Stem2AAF</div>
       <div class="app-ver">Version ${VERSION} (${BUILD})</div>
       <div class="app-desc">Watches a folder for stem exports and converts them to AAF files ready for import into your favourite app.</div>
-      <div class="about-links">
-        <a class="about-link" href="#" onclick="post({action:'open_url',url:'https://github.com/hannesfalk/stem2aaf/issues'});return false">Report an issue</a>
-        <a class="about-link" href="#" onclick="post({action:'open_url',url:'https://github.com/hannesfalk/stem2aaf/releases'});return false">Release notes</a>
-      </div>
+      <div class="app-desc" style="margin-top:10px">Every conversion writes a log next to its AAF. If something goes wrong, that file says what happened.</div>
     </div>`;
 }
 
@@ -554,6 +570,7 @@ function autoSave() {
       group_by_cat:  S.group_by_cat,
       delete_stems:  S.delete_stems,
       auto_convert:  S.auto_convert,
+      launch_at_login: S.launch_at_login,
       categories:    S.categories,
     }
   });
@@ -605,8 +622,9 @@ class SettingsWindow:
         Called with the updated config dict when the user clicks Save.
     """
 
-    def __init__(self, config: dict, on_save):
+    def __init__(self, config: dict, on_save, on_uninstall=None):
         self._on_save = on_save
+        self._on_uninstall = on_uninstall
         self._handler = None
         self._webview = None
         self._panel   = None
@@ -630,13 +648,19 @@ class SettingsWindow:
                 "keywords": kws,
             })
 
+        # Defaults here only matter when a key is missing entirely. They
+        # match config.py's own defaults rather than inventing different
+        # ones, which is how the panel used to show ~/Music/Stems for an
+        # app that actually watches ~/Documents/Stem2AAF.
+        _default_folder = os.path.expanduser("~/Documents/Stem2AAF")
         state = {
-            "watch_folder":  config.get("watch_folder",  "~/Music/Stems"),
-            "output_folder": config.get("output_folder", "~/Music/AAF Exports"),
-            "group_by_cat":  config.get("group_by_cat",  True),
-            "delete_stems":  config.get("delete_stems",  False),
-            "auto_convert":  config.get("auto_convert",  False),
-            "categories":    cats,
+            "watch_folder":    config.get("watch_folder")  or _default_folder,
+            "output_folder":   config.get("output_folder") or _default_folder,
+            "group_by_cat":    config.get("group_by_cat",    False),
+            "delete_stems":    config.get("delete_stems",    False),
+            "auto_convert":    config.get("auto_convert",    False),
+            "launch_at_login": config.get("launch_at_login", False),
+            "categories":      cats,
         }
 
         # Message handler
@@ -677,6 +701,20 @@ class SettingsWindow:
         NSApp.activateIgnoringOtherApps_(True)
         self._panel.makeKeyAndOrderFront_(None)
 
+    def is_open(self) -> bool:
+        """
+        Whether this panel is still on screen.
+
+        The app uses this to bring an existing Settings window forward
+        instead of building a second one. Without it, clicking Settings
+        twice left an orphaned panel visible that still wrote to the same
+        config file.
+        """
+        try:
+            return bool(self._panel is not None and self._panel.isVisible())
+        except Exception:  # noqa: BLE001 - a dead panel is simply not open
+            return False
+
     # ── Message handling ──────────────────────────────────────────────────────
 
     def _on_message(self, body: dict):
@@ -695,21 +733,22 @@ class SettingsWindow:
                     "keywords": [str(k) for k in c.get("keywords", [])],
                 })
             config = {
-                "watch_folder":  str(raw.get("watch_folder",  "")),
-                "output_folder": str(raw.get("output_folder", "")),
-                "group_by_cat":  bool(raw.get("group_by_cat",  True)),
-                "delete_stems":  bool(raw.get("delete_stems",  False)),
-                "auto_convert":  bool(raw.get("auto_convert",  False)),
-                "categories":    cats,
+                "watch_folder":    str(raw.get("watch_folder",  "")),
+                "output_folder":   str(raw.get("output_folder", "")),
+                "group_by_cat":    bool(raw.get("group_by_cat",    False)),
+                "delete_stems":    bool(raw.get("delete_stems",    False)),
+                "auto_convert":    bool(raw.get("auto_convert",    False)),
+                "launch_at_login": bool(raw.get("launch_at_login", False)),
+                "categories":      cats,
             }
             # Live apply — the panel stays open; the close button dismisses it.
             self._on_save(config)
 
-        elif action == "open_url":
-            import subprocess
-            url = body.get("url", "")
-            if url.startswith("https://"):
-                subprocess.Popen(["open", url])
+        elif action == "uninstall":
+            # Handed back to the app, which owns the confirmation dialog
+            # and the bundled uninstall script.
+            if self._on_uninstall is not None:
+                self._on_uninstall()
 
     def _open_folder(self, key: str):
         panel = NSOpenPanel.openPanel()

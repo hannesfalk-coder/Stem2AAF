@@ -15,11 +15,26 @@ set scriptPath to POSIX path of (path to me)
 set projectFolder to do shell script "dirname " & quoted form of scriptPath
 set logPath to (POSIX path of (path to desktop)) & "Stem2AAF_build_log.txt"
 
+-- `do shell script` hands back its output with carriage returns as the
+-- line separator, so writing it out verbatim produced a 750 KB file that
+-- is a single line as far as most editors are concerned - awkward for
+-- something the dialogs tell you to just open and read. This swaps them
+-- for linefeeds first.
+on crToLf(theText)
+	set savedDelimiters to AppleScript's text item delimiters
+	set AppleScript's text item delimiters to return
+	set theParts to every text item of theText
+	set AppleScript's text item delimiters to linefeed
+	set theResult to theParts as text
+	set AppleScript's text item delimiters to savedDelimiters
+	return theResult
+end crToLf
+
 on writeLog(contents, logPath)
 	try
 		set fileRef to open for access POSIX file logPath with write permission
 		set eof of fileRef to 0
-		write contents to fileRef as Çclass utf8È
+		write my crToLf(contents) to fileRef as Çclass utf8È
 		close access fileRef
 	on error
 		try
@@ -28,7 +43,7 @@ on writeLog(contents, logPath)
 	end try
 end writeLog
 
-display dialog "This will build Stem2AAF.app and install it to your Applications folder. This can take a minute or two - click OK to start." buttons {"Cancel", "OK"} default button "OK"
+display dialog "This will build Stem2AAF.app and install it to your Applications folder. This can take a few minutes - click OK to start." buttons {"Cancel", "OK"} default button "OK"
 
 try
 	set shellCommand to "cd " & quoted form of projectFolder & " && /bin/bash build.sh 2>&1"
@@ -46,7 +61,7 @@ try
 	my writeLog(buildOutput, logPath)
 	
 	if buildOutput contains "BUILD_COMPLETE_OK" then
-		display dialog "Stem2AAF is installed in your Applications folder, with its Uninstaller bundled inside it - use \"Uninstall Stem2AAF...\" from its menu bar icon whenever you want to remove it." & return & return & "First time you open it: right-click it in Applications, choose Open, then click Open again - this is only needed once, since it isn't signed with an Apple Developer certificate." & return & return & "Full build log saved to ~/Desktop/Stem2AAF_build_log.txt" buttons {"OK"} default button "OK"
+		display dialog "Stem2AAF is installed in your Applications folder. To remove it later, use \"Uninstall Stem2AAF...\" from its menu bar icon." & return & return & "First time you open it: right-click it in Applications, choose Open, then click Open again - this is only needed once, since it isn't signed with an Apple Developer certificate." & return & return & "Full build log saved to ~/Desktop/Stem2AAF_build_log.txt" buttons {"OK"} default button "OK"
 	else
 		display dialog "The build finished but something looks off. Full details were saved to:" & return & return & logPath & return & return & "Open that file (or send it over) to see exactly what happened." buttons {"OK"} default button "OK"
 	end if

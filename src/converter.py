@@ -45,13 +45,18 @@ class ConversionError(Exception):
     """Raised when a batch of stems can't be converted."""
 
 
-_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9 _\-]")
+# Parentheses are deliberately allowed: _rename_stem_track() puts Bitwig's
+# track number in them, and stripping them here turned the intended
+# "Drums_Kick (01)" into "Drums_Kick _01_" in every AAF this tool has ever
+# written. They're plain ASCII and safe for AAF relinking; it's accented and
+# non-ASCII characters that cause the documented relink failures.
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Za-z0-9 _\-()]")
 
 
 def _sanitize_name(name: str, fallback: str = "Track") -> str:
-    """Strips anything that isn't plain ASCII alphanumerics/space/-/_ , since
-    accented or special characters in track names are a documented cause
-    of relinking failures when the AAF is later imported."""
+    """Strips anything that isn't plain ASCII alphanumerics/space/-/_/() ,
+    since accented or special characters in track names are a documented
+    cause of relinking failures when the AAF is later imported."""
     cleaned = _UNSAFE_NAME_CHARS.sub("_", name or "")
     cleaned = cleaned.strip() or fallback
     return cleaned
@@ -134,18 +139,34 @@ def _categorize_stem_name(
 _BITWIG_NUMBER_RE = re.compile(r'^(\d+)\s+(.+)$')
 
 
-def _rename_stem_track(filename: str, kw_list: list | None = None, disabled_keywords: dict | None = None) -> str:
+def _rename_stem_track(
+    filename: str,
+    kw_list: list | None = None,
+    disabled_keywords: dict | None = None,
+    group_by_category: bool = False,
+) -> str:
     """
     Converts a Bitwig stem filename to a readable AAF track name.
 
     Bitwig prepends a number to individual track exports ("01 Kick.wav").
-    This moves that number to the end and prefixes with the detected
-    category so DaVinci Resolve shows clean, sorted track names:
+    This moves that number to the end so DaVinci Resolve shows clean,
+    sorted track names.
 
+    The category prefix is only added when grouping is actually turned on.
+    Previously it was added unconditionally, so a user who had switched
+    "Group stems by category" off still got "Unmatched_" stamped onto
+    every unrecognised track name - a prefix naming a feature they had
+    deliberately disabled.
+
+    With group_by_category=True:
       "01 Kick.wav"          -> "Drums_Kick (01)"
       "Drum grp Master.wav"  -> "Drums_Drum grp Master"
       "Boards of X.wav"      -> "Unmatched_Boards of X"
       "Master.wav"           -> "Master"  (kept intact, sorted last)
+
+    With group_by_category=False:
+      "01 Kick.wav"          -> "Kick (01)"
+      "Boards of X.wav"      -> "Boards of X"
     """
     base = os.path.splitext(os.path.basename(filename))[0]
 
@@ -161,12 +182,14 @@ def _rename_stem_track(filename: str, kw_list: list | None = None, disabled_keyw
         number = None
         name   = base
 
-    category = _categorize_stem_name(filename, kw_list, disabled_keywords)
-    prefix   = category if category != "Other" else "Unmatched"
+    if group_by_category:
+        category = _categorize_stem_name(filename, kw_list, disabled_keywords)
+        prefix   = category if category != "Other" else "Unmatched"
+        name     = f"{prefix}_{name}"
 
     if number is not None:
-        return f"{prefix}_{name} ({number})"
-    return f"{prefix}_{name}"
+        return f"{name} ({number})"
+    return name
 
 
 def _validate_aaf(path: str, expected_track_count: int) -> None:
@@ -194,30 +217,63 @@ def _validate_aaf(path: str, expected_track_count: int) -> None:
         raise ConversionError(f"Validation failed: the written AAF could not be re-opened ({e}).")
 
 
+# Frames per block when transcoding. 65536 frames is about 1.4 seconds of
+# 48 kHz stereo, so the working set stays under a megabyte no matter how
+# long the stem is.
+_NORMALIZE_BLOCK_FRAMES = 1 << 16
+
+
 def _normalize_wav(src_path: str, target_rate: int, work_dir: str) -> str:
     """
     Transcodes a WAV file to 24-bit PCM - the format pyaaf2 can reliably
     embed - and returns the path to the normalized copy, written into
     work_dir. Does not resample: target_rate is expected to already match
     the file's actual rate (stems_to_aaf() enforces this upstream).
+
+    Streams the file in blocks rather than reading it whole. The previous
+    version called sf.read(), which decodes the entire stem into one
+    float64 array: a five-minute 32-bit float stereo stem took about
+    230 MB of memory, and a twenty-minute one close to a gigabyte, purely
+    to rewrite it a block at a time on the way out. Reading float32 rather
+    than the float64 default is lossless here too, since the source is
+    32-bit float at most and the destination is 24-bit integer.
     """
     import soundfile as sf
 
-    data, orig_rate = sf.read(src_path, always_2d=True)
-    if orig_rate != target_rate:
-        # Should be unreachable: stems_to_aaf() already rejects any batch
-        # with a sample-rate mismatch before normalization ever runs, so
-        # every call here should already be at target_rate. Fail loudly
-        # instead of silently writing a mismatched file if that invariant
-        # is ever broken by a future change.
-        raise ConversionError(
-            f"Internal error: '{os.path.basename(src_path)}' is {orig_rate}Hz "
-            f"but {target_rate}Hz was expected after rate validation."
-        )
-
     out_name = f"normalized_{target_rate}_{os.path.basename(src_path)}"
     out_path = os.path.join(work_dir, out_name)
-    sf.write(out_path, data, target_rate, subtype="PCM_24")
+
+    with sf.SoundFile(src_path) as src:
+        if src.samplerate != target_rate:
+            # Should be unreachable: stems_to_aaf() already rejects any batch
+            # with a sample-rate mismatch before normalization ever runs, so
+            # every call here should already be at target_rate. Fail loudly
+            # instead of silently writing a mismatched file if that invariant
+            # is ever broken by a future change.
+            raise ConversionError(
+                f"Internal error: '{os.path.basename(src_path)}' is {src.samplerate}Hz "
+                f"but {target_rate}Hz was expected after rate validation."
+            )
+
+        # Format is inferred from out_path's extension, matching the source
+        # container (a .aiff source stays AIFF), exactly as sf.write() did.
+        with sf.SoundFile(
+            out_path, mode="w", samplerate=target_rate,
+            channels=src.channels, subtype="PCM_24",
+        ) as dst:
+            # buffer_read/buffer_write rather than read/write or blocks(),
+            # because those go through numpy and these don't. Dropping
+            # numpy from the bundle matters a lot here: numpy's Intel wheel
+            # carries its own copy of OpenBLAS, so a universal build that
+            # included numpy came to 156 MB against 30 MB without it, for a
+            # library this app only ever used to shuttle samples between
+            # two libsndfile handles.
+            while True:
+                block = src.buffer_read(_NORMALIZE_BLOCK_FRAMES, dtype="float32")
+                if not len(block):
+                    break
+                dst.buffer_write(block, dtype="float32")
+
     return out_path
 
 
@@ -371,7 +427,9 @@ def stems_to_aaf(
                     return (0, os.path.getmtime(p))
 
             for wav_path in sorted(wav_paths, key=sort_key):
-                track_name = _sanitize_name(_rename_stem_track(wav_path, kw_list, disabled_keywords))
+                track_name = _sanitize_name(
+                    _rename_stem_track(wav_path, kw_list, disabled_keywords, group_by_category)
+                )
                 embed_path = normalized_paths[wav_path]
 
                 embed_info = sf.info(embed_path)
@@ -412,8 +470,16 @@ def stems_to_aaf(
 
 if __name__ == "__main__":
     import sys
+
     if len(sys.argv) < 3:
         print("Usage: python converter.py output.aaf stem1.wav [stem2.wav ...]")
         sys.exit(1)
-    result = stems_to_aaf(sys.argv[2:], sys.argv[1])
+    # The README sends people here for "a clearer error message", so catch
+    # ConversionError and print it plainly rather than letting a traceback
+    # bury the one line that actually explains the problem.
+    try:
+        result = stems_to_aaf(sys.argv[2:], sys.argv[1])
+    except ConversionError as e:
+        print(f"Conversion failed: {e}", file=sys.stderr)
+        sys.exit(1)
     print(f"Wrote {result}")

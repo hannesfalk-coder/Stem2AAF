@@ -6,9 +6,9 @@
 # want to share the app with someone else (e.g. as a download); it's not
 # part of the normal local install flow.
 #
-# Only Stem2AAF.app itself needs to be here - its Uninstaller travels
-# along inside it and is extracted to /Applications automatically on first
-# launch, so the user ends up with both apps without needing a busier DMG.
+# Only Stem2AAF.app goes in the image. Uninstalling is a menu item in the
+# app itself now ("Uninstall Stem2AAF..."), backed by a script inside
+# Contents/Resources, so there is no second app to ship alongside it.
 #
 # Usage (in Terminal, from inside this project folder):
 #   chmod +x make_dmg.sh && ./make_dmg.sh

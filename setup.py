@@ -18,11 +18,19 @@ this app will fall back to a plain default icon in Finder/Spotlight/Dock
 since that comes from icon.png below, not this).
 
 The finished app appears at dist/Stem2AAF.app - drag it to /Applications.
+
+There is only one py2app target now. The Uninstaller used to be a second
+.app built from its own setup_uninstaller.py; it is a shell script in
+Contents/Resources these days (src/assets/uninstall.sh).
 """
 
 import os
+import sys
 
 from setuptools import setup
+
+sys.path.insert(0, "src")
+from version import VERSION, BUILD  # noqa: E402  - src/ added to path just above
 
 APP = ["src/app.py"]
 # Places icon.png and its animation frames directly in Contents/Resources
@@ -39,6 +47,10 @@ DATA_FILES = [(
         "src/assets/icon_fill_3.png",
         "src/assets/icon_fill_4.png",
         "src/assets/icon_flash_white.png",
+        # Run by "Uninstall Stem2AAF..." in the menu. This replaced a
+        # second full .app, built by its own py2app run, that existed only
+        # to show one dialog and delete two folders at a cost of ~20 MB.
+        "src/assets/uninstall.sh",
     ],
 )]
 OPTIONS = {
@@ -48,7 +60,10 @@ OPTIONS = {
         "CFBundleName": "Stem2AAF",
         "CFBundleDisplayName": "Stem to AAF",
         "CFBundleIdentifier": "com.local.stem2aaf",
-        "CFBundleShortVersionString": "1.0.0",
+        "CFBundleShortVersionString": VERSION,
+        # Previously unset, so every build shipped as CFBundleVersion
+        # 0.0.0 while the About panel claimed something else entirely.
+        "CFBundleVersion": BUILD,
     },
     # "_soundfile_data" (note the leading underscore - it's a separate,
     # independent package from "soundfile" itself, not a submodule of it)
@@ -75,6 +90,20 @@ OPTIONS = {
         # Asian-language codec modules - never needed for audio/AAF work
         "_codecs_cn", "_codecs_hk", "_codecs_iso2022",
         "_codecs_jp", "_codecs_kr", "_codecs_tw",
+        # numpy is deliberately NOT bundled. soundfile only imports it
+        # inside the functions that hand back arrays, and converter.py
+        # uses buffer_read/buffer_write instead, which never touch it.
+        #
+        # Leaving it in was expensive: numpy's x86_64 wheel bundles its own
+        # OpenBLAS and libgfortran, about 93 MB that the arm64 wheel does
+        # not carry at all because it uses Accelerate. A universal build
+        # with numpy came to 156 MB; without it the app is around 30 MB.
+        #
+        # If a future change calls sf.read(), sf.write() or SoundFile.blocks(),
+        # that will raise ImportError in the packaged app while working fine
+        # from source. tests/test_converter.py's numpy-free check guards this.
+        "numpy",
+        "pytest", "setuptools", "pip", "wheel",
     ],
 }
 

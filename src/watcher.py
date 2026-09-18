@@ -15,6 +15,10 @@ from converter import stems_to_aaf, ConversionError, _sanitize_name
 # size to stop changing before touching it, in case of a slow disk /
 # network volume.
 SETTLE_SECONDS = 1.5
+# How many size-comparison passes to make before giving up on a file that
+# keeps changing. The whole batch is checked once per pass, so this is a
+# ceiling on total settle time, not per-file time.
+SETTLE_MAX_PASSES = 15
 STEMS_POLL_INTERVAL_SECONDS = 1.0
 
 _WAV_EXTENSIONS = (".wav", ".wave")
@@ -96,7 +100,8 @@ class StemsBatchHandler(FileSystemEventHandler):
             mtime = os.path.getmtime(path)
         except OSError:
             return False
-        return (path, mtime) in self._processed
+        with self._lock:
+            return (path, mtime) in self._processed
 
     def _maybe_track(self, path: str):
         path = os.path.normpath(path)
@@ -180,41 +185,79 @@ class StemsBatchHandler(FileSystemEventHandler):
                     log_dir=self.watch_folder,  # this can happen before a conversion folder exists
                 )
 
+    def _settle_batch(self, batch: list[str]) -> tuple[list[str], dict[str, str]]:
+        """
+        Waits until every file's size has stopped changing.
+
+        Every file in the batch is checked once per pass and the sleep
+        happens once per pass rather than once per file, so a 40-stem
+        export settles in roughly one interval instead of forty. The
+        earlier version slept SETTLE_SECONDS per file in sequence, which
+        cost a full minute of doing nothing on a large export before any
+        real work started.
+
+        Returns (settled, problems), where problems maps each path that
+        never stabilised to a short reason. Callers must treat a non-empty
+        problems dict as a hard failure - see _convert_batch.
+        """
+        pending = list(batch)
+        last_sizes = {p: -1 for p in pending}
+        reasons = {p: "still being written" for p in pending}
+        settled: list[str] = []
+
+        for _ in range(SETTLE_MAX_PASSES):
+            still_moving = []
+            for p in pending:
+                try:
+                    size = os.path.getsize(p)
+                except FileNotFoundError:
+                    reasons[p] = "disappeared while waiting for it"
+                    still_moving.append(p)
+                    continue
+                except OSError as e:
+                    reasons[p] = f"couldn't be read ({e.strerror or e})"
+                    still_moving.append(p)
+                    continue
+                if size > 0 and size == last_sizes[p]:
+                    settled.append(p)
+                else:
+                    last_sizes[p] = size
+                    reasons[p] = "still being written" if size > 0 else "is empty"
+                    still_moving.append(p)
+            pending = still_moving
+            self.on_progress(0.5 * len(settled) / len(batch))
+            if not pending:
+                break
+            time.sleep(SETTLE_SECONDS)
+
+        self.on_progress(0.5 * len(settled) / len(batch))
+        return settled, {p: reasons[p] for p in pending}
+
     def _convert_batch(self, batch: list[str]):
         # Wait for every file's size to stop changing before touching them.
         # This settle-check phase and the actual AAF-writing phase below
         # are weighted 50/50 into one combined 0.0-1.0 progress signal -
         # see stems_to_aaf's own on_progress for the second half.
-        settled = []
-        unsettled = []
-        for i, path in enumerate(batch):
-            last_size = -1
-            ok = False
-            try:
-                for _ in range(15):
-                    if not os.path.exists(path):
-                        break
-                    size = os.path.getsize(path)
-                    if size == last_size and size > 0:
-                        ok = True
-                        break
-                    last_size = size
-                    time.sleep(SETTLE_SECONDS)
-            except OSError:
-                ok = False
-            if ok:
-                settled.append(path)
-            else:
-                unsettled.append(path)
-            self.on_progress(0.5 * (i + 1) / len(batch))
+        settled, problems = self._settle_batch(batch)
 
-        if not settled:
-            names = ", ".join(os.path.basename(p) for p in unsettled) or "no files"
+        # All-or-nothing, deliberately. Converting whichever files happened
+        # to be ready would hand back an AAF that is missing tracks, with a
+        # success notification and nothing anywhere saying which stems were
+        # left out - the exact silent-incomplete-export failure this tool
+        # exists to avoid. If any file in the batch isn't ready, nothing is
+        # converted and the reason names every file involved.
+        if problems:
+            detail = "; ".join(
+                f"{os.path.basename(p)} ({reason})"
+                for p, reason in sorted(problems.items(), key=lambda kv: os.path.basename(kv[0]))
+            )
             self.on_result(
                 f"{len(batch)} stem file(s)",
                 False,
-                f"None of the stem files finished settling (still changing size, missing, or unreadable after "
-                f"{15 * SETTLE_SECONDS:.0f}s): {names}",
+                f"Nothing was converted: {len(problems)} of {len(batch)} stem file(s) weren't ready after "
+                f"{SETTLE_MAX_PASSES * SETTLE_SECONDS:.0f}s - {detail}. "
+                "Wait until the export has fully finished, then convert again. "
+                "Converting now would have produced an AAF missing those tracks.",
                 log_dir=self.watch_folder,  # no conversion folder exists yet - nothing was attempted
             )
             return
@@ -252,17 +295,39 @@ class StemsBatchHandler(FileSystemEventHandler):
             self._archive(settled, conversion_dir)
             self.on_result(label, True, out_path, log_dir=conversion_dir)
         except ConversionError as e:
-            self.on_result(label, False, str(e), log_dir=conversion_dir)
+            log_dir = self._discard_if_unused(conversion_dir)
+            self.on_result(label, False, str(e), log_dir=log_dir)
         except Exception as e:  # noqa: BLE001
+            log_dir = self._discard_if_unused(conversion_dir)
             self.on_result(
                 label, False, f"Unexpected error: {type(e).__name__}: {e}\n{traceback.format_exc()}",
-                log_dir=conversion_dir,
+                log_dir=log_dir,
             )
         finally:
-            for path in settled:
-                mtime = settled_mtimes.get(path)
-                if mtime is not None:
-                    self._processed.add((path, mtime))
+            with self._lock:
+                for path in settled:
+                    mtime = settled_mtimes.get(path)
+                    if mtime is not None:
+                        self._processed.add((path, mtime))
+
+    def _discard_if_unused(self, conversion_dir: str) -> str:
+        """
+        Removes the per-conversion folder when a conversion failed before
+        writing anything into it, and returns the folder the failure should
+        be logged to instead.
+
+        Without this, every failed attempt leaves an empty
+        "<project> Converted vN" folder behind and burns that version
+        number, so a few failures in a row push the next real conversion
+        to v5 with v1-v4 sitting there empty.
+        """
+        try:
+            if os.path.isdir(conversion_dir) and not os.listdir(conversion_dir):
+                os.rmdir(conversion_dir)
+                return self.watch_folder
+        except OSError:
+            pass
+        return conversion_dir
 
     def _archive(self, paths: list[str], destination_dir: str):
         """

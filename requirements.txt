@@ -1,6 +1,22 @@
 pyaaf2==1.7.1
 watchdog>=6.0.0
 rumps>=0.4.0
-pyobjc-framework-WebKit>=10.0
+# Pinned: 11.1 is the last pyobjc release with Python 3.9 wheels. Leaving
+# this open resolved to a newer pyobjc-framework-WebKit that requires
+# pyobjc-core 12.x, which has no 3.9 wheel at all, so pip fell back to
+# building it from source - and that build fails outright against current
+# clang. A clean "rm -rf venv && ./build.sh" hit this; existing venvs kept
+# working only because they still had the older version installed.
+pyobjc-core==11.1
+pyobjc-framework-Cocoa==11.1
+pyobjc-framework-WebKit==11.1
 py2app>=0.28
 soundfile>=0.12
+# Pinned because it is the newest cffi that still publishes BOTH an arm64
+# and an x86_64 wheel for Python 3.9. build.sh fuses the two into one
+# universal2 wheel so the finished app runs on Intel Macs as well as Apple
+# Silicon; cffi 2.x ships arm64 only for 3.9, which would silently make the
+# build Apple-Silicon-only again.
+cffi==1.17.1
+# Build-time only: merges per-architecture wheels into universal2 ones.
+delocate>=0.13

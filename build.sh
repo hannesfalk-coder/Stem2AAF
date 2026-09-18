@@ -4,13 +4,25 @@
 #
 # (Or double-click "Build Stem2AAF.applescript" instead - no Terminal needed.)
 #
-# Builds Stem2AAF.app with the Uninstaller bundled inside it at
-# Contents/Resources/Stem2AAF Uninstaller.app, then installs both to
-# /Applications. Built as two separate py2app invocations so each app gets
-# its own distinct bundle identity (py2app merges plist settings when
-# multiple targets share one invocation).
+# Builds Stem2AAF.app and installs it to /Applications.
+#
+# One py2app target. The Uninstaller used to be a second .app built from
+# its own setup_uninstaller.py - a whole extra copy of Python and PyObjC,
+# about 20 MB, to show one dialog and delete two folders. It is a shell
+# script in Contents/Resources now (src/assets/uninstall.sh), reachable
+# from the app's own "Uninstall Stem2AAF..." menu item.
 
 set -e
+
+# --no-install builds into dist/ and stops there, without replacing what is
+# in /Applications. Useful for checking a build before committing to it.
+INSTALL=1
+for arg in "$@"; do
+    case "$arg" in
+        --no-install) INSTALL=0 ;;
+        *) echo "Unknown option: $arg"; echo "Usage: ./build.sh [--no-install]"; exit 1 ;;
+    esac
+done
 
 # Widen PATH so this still finds python3 when triggered from a minimal
 # environment (e.g. AppleScript's `do shell script`), which doesn't load
@@ -29,6 +41,63 @@ python3 -m venv venv
 
 echo "Installing dependencies..."
 venv/bin/python3 -m pip install --quiet -r requirements.txt
+
+# --- Universal (Intel + Apple Silicon) dependencies --------------------------
+#
+# pip installs wheels for the machine doing the build, so a build on an
+# Apple Silicon Mac produced an app whose launcher and Python framework
+# were universal but whose cffi, libsndfile and watchdog binaries were
+# arm64 only. macOS runs that app as x86_64 on an Intel Mac and the
+# very first import fails, which made every shared .dmg dead on arrival
+# there.
+#
+# cffi, soundfile and watchdog publish per-architecture wheels rather
+# than universal2 ones, so fetch both architectures and fuse them with
+# delocate. soundfile's merged wheel carries libsndfile_arm64.dylib and
+# libsndfile_x86_64.dylib side by side and picks the right one at import,
+# which is how that package expects to be universal.
+echo "Building universal2 dependencies..."
+# numpy is not in this list because it is not bundled at all - see the
+# excludes in setup.py. Fusing it would mean downloading ~93 MB of OpenBLAS
+# for nothing.
+UNIV_PKGS=(cffi soundfile watchdog)
+WHEEL_DIR="build_wheels"
+rm -rf "$WHEEL_DIR"
+mkdir -p "$WHEEL_DIR/arm64" "$WHEEL_DIR/x86_64" "$WHEEL_DIR/universal2"
+
+for pkg in "${UNIV_PKGS[@]}"; do
+    # Resolve to whatever version the venv already settled on, so the
+    # universal build matches the versions everything else was tested with.
+    ver=$(venv/bin/python3 -c "
+import importlib.metadata as m
+try: print(m.version('$pkg'))
+except Exception: print('')
+")
+    [ -n "$ver" ] || { echo "  skipping $pkg (not installed)"; continue; }
+    venv/bin/python3 -m pip download --quiet --no-deps --only-binary=:all: \
+        --platform macosx_11_0_arm64  --python-version 3.9 \
+        -d "$WHEEL_DIR/arm64"  "$pkg==$ver"
+    venv/bin/python3 -m pip download --quiet --no-deps --only-binary=:all: \
+        --platform macosx_10_9_x86_64 --python-version 3.9 \
+        -d "$WHEEL_DIR/x86_64" "$pkg==$ver"
+done
+
+for arm_whl in "$WHEEL_DIR"/arm64/*.whl; do
+    [ -e "$arm_whl" ] || continue
+    stem="$(basename "$arm_whl")"; stem="${stem%%-macosx*}"
+    x86_whl=$(ls "$WHEEL_DIR/x86_64/${stem}"-macosx*.whl 2>/dev/null | head -1 || true)
+    if [ -n "$x86_whl" ]; then
+        venv/bin/delocate-merge "$arm_whl" "$x86_whl" -w "$WHEEL_DIR/universal2" >/dev/null
+    else
+        echo "  WARNING: no x86_64 wheel for $stem - the app will be Apple Silicon only"
+    fi
+done
+
+if ls "$WHEEL_DIR"/universal2/*.whl >/dev/null 2>&1; then
+    venv/bin/python3 -m pip install --quiet --force-reinstall --no-deps \
+        "$WHEEL_DIR"/universal2/*.whl
+fi
+rm -rf "$WHEEL_DIR"
 
 # Converts a source PNG into a full multi-resolution .icns file using
 # macOS's built-in sips and iconutil - no extra tools needed.
@@ -55,35 +124,68 @@ make_icns() {
 }
 
 echo "Generating icons..."
-make_icns "src/assets/app_icon_source.png"         "app_icon.icns"
-make_icns "src/assets/uninstaller_icon_source.png" "uninstaller_icon.icns"
+make_icns "src/assets/app_icon_source.png" "app_icon.icns"
 
 echo "Building Stem2AAF.app..."
+rm -rf build dist/Stem2AAF.app
 venv/bin/python3 setup.py py2app
 
-echo "Building Stem2AAF Uninstaller.app..."
-rm -rf build   # py2app reuses ./build between invocations; start clean per target
-venv/bin/python3 setup_uninstaller.py py2app
+echo "Checking the build is universal..."
+# A non-universal binary here means the app will not start on an Intel
+# Mac. Report it rather than discovering it from someone else's crash.
+# A plain while-read loop, not xargs: passing 79 long paths through
+# `xargs -I{}` overflows its command-line limit, and it reported success
+# while actually having checked nothing.
+#
+# libsndfile is the deliberate exception. soundfile ships
+# libsndfile_arm64.dylib and libsndfile_x86_64.dylib side by side and
+# picks one at import, so each of those two files is single-architecture
+# by design; what matters is that both are present.
+non_universal=""
+checked=0
+while IFS= read -r binary; do
+    case "$(basename "$binary")" in libsndfile_*) continue ;; esac
+    checked=$((checked + 1))
+    archs=$(lipo -archs "$binary" 2>/dev/null)
+    case "$archs" in
+        *arm64*x86_64*|*x86_64*arm64*) ;;
+        *) non_universal="${non_universal}    $(basename "$binary") [$archs]"$'\n' ;;
+    esac
+done < <(find "dist/Stem2AAF.app" \( -name "*.so" -o -name "*.dylib" \))
 
-echo "Bundling Uninstaller inside Stem2AAF.app..."
-rm -rf "dist/Stem2AAF.app/Contents/Resources/Stem2AAF Uninstaller.app"
-cp -R  "dist/Stem2AAF Uninstaller.app" "dist/Stem2AAF.app/Contents/Resources/"
+for arch in arm64 x86_64; do
+    if ! find "dist/Stem2AAF.app" -name "libsndfile_${arch}.dylib" | grep -q .; then
+        non_universal="${non_universal}    libsndfile_${arch}.dylib is missing"$'\n'
+    fi
+done
 
-echo "Installing to /Applications..."
-rm -rf "/Applications/Stem2AAF.app"
-mv     "dist/Stem2AAF.app" /Applications/
+if [ -n "$non_universal" ]; then
+    echo "  WARNING: this build will not run on every Mac:"
+    printf '%s' "$non_universal"
+else
+    echo "  All $checked bundled binaries are universal, and both libsndfile"
+    echo "  slices are present (Intel + Apple Silicon)."
+fi
 
-# Also extract the Uninstaller directly to /Applications for local builds
-# so it appears immediately without needing a first launch.
-# DMG installs skip this - the main app extracts it automatically on first run.
-rm -rf "/Applications/Stem2AAF Uninstaller.app"
-cp -R  "/Applications/Stem2AAF.app/Contents/Resources/Stem2AAF Uninstaller.app" /Applications/
+if [ "$INSTALL" -eq 1 ]; then
+    echo "Installing to /Applications..."
+    rm -rf "/Applications/Stem2AAF.app"
+    mv     "dist/Stem2AAF.app" /Applications/
+
+    # Older installs put a separate Uninstaller app here. It has no app left
+    # to uninstall now, so take it away rather than leaving a dead icon.
+    rm -rf "/Applications/Stem2AAF Uninstaller.app"
+fi
 
 # Clean up leftover build artifacts
-rm -f app_icon.icns uninstaller_icon.icns
+rm -f app_icon.icns
 
 echo ""
 echo "BUILD_COMPLETE_OK"
-echo "Done. Stem2AAF.app and Stem2AAF Uninstaller.app are in /Applications."
-echo "Use \"Uninstall Stem2AAF...\" from the menu bar to remove them."
-echo "First launch: right-click -> Open -> Open (to bypass the unsigned-developer warning)."
+if [ "$INSTALL" -eq 1 ]; then
+    echo "Done. Stem2AAF.app is in /Applications."
+    echo "Use \"Uninstall Stem2AAF...\" from its menu bar icon to remove it."
+    echo "First launch: right-click -> Open -> Open (to bypass the unsigned-developer warning)."
+else
+    echo "Done. Stem2AAF.app is in dist/ (not installed - --no-install was given)."
+fi

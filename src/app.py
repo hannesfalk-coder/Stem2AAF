@@ -3,31 +3,53 @@ Stem2AAF menu bar app (macOS only), stems-only.
 
 Runs quietly in the menu bar. Watches one folder for stem exports
 (File -> Export Audio...) and, when you click "Convert to AAF", batches
-whatever has arrived into an .aaf file written into that same folder.
-There's no automatic conversion - see convert_now() below for why.
+whatever has arrived into an .aaf file. Conversions are written to the
+watched folder by default, or to a separate output folder if one is set
+in Settings.
+
+Conversion normally happens when you click it. Auto-convert, off by
+default, will also fire once the number of waiting stems has held steady
+long enough - see _poll_folder. Either path refuses to build an AAF from
+a batch where any file is still being written, so an incomplete export
+produces an error rather than an AAF quietly missing tracks.
 
 Build into a double-clickable .app with `python3 setup.py py2app` (see
-setup.py in this folder) - that step must be run on a Mac. To remove this
-app later, use the separate Uninstaller app built alongside it (see
-setup_uninstaller.py / uninstaller.py), rather than deleting it by hand.
+setup.py in this folder) - that step must be run on a Mac. To remove it
+later, use "Uninstall Stem2AAF..." in its own menu, which runs the
+uninstall script bundled in Contents/Resources.
 """
 
 import datetime
 import os
 import subprocess
-import traceback
-
-import shutil
 
 import rumps
-from AppKit import NSOpenPanel, NSApp, NSBundle
-from Foundation import NSURL
+from AppKit import NSBundle
 
 import config
 from settings_window import SettingsWindow, DEFAULT_CATEGORIES
 from watcher import Watcher
 
 LOG_FILENAME = "Stem2AAF_log.txt"
+
+# How often the menu-bar app looks at the watched folder, in seconds. Drives
+# both the "(N waiting)" label and the auto-convert quiet check.
+POLL_SECONDS = 2
+
+# How long the number of waiting stems must hold completely steady before
+# auto-convert fires, in seconds. The old value was a single 2-second tick,
+# which is shorter than the gap Bitwig leaves between finishing one track
+# and creating the next when a track carries a heavy plugin chain - so
+# auto-convert could fire in the middle of an export. The watcher refuses to
+# build a partial AAF now, so the failure mode is a clear error rather than a
+# silently incomplete file, but the wait still needs to be long enough that
+# a normal export doesn't trip it.
+AUTO_CONVERT_QUIET_SECONDS = 12
+
+UNINSTALL_SCRIPT_NAME = "uninstall.sh"
+
+BUNDLE_ID = "com.local.stem2aaf"
+LAUNCH_AGENT_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{BUNDLE_ID}.plist")
 
 
 def _append_conversion_log(folder: str, success: bool, label: str, message: str):
@@ -82,8 +104,7 @@ def _ensure_single_instance():
     """
     import subprocess
     from AppKit import NSRunningApplication
-    bundle_id = "com.local.stem2aaf"
-    running = NSRunningApplication.runningApplicationsWithBundleIdentifier_(bundle_id)
+    running = NSRunningApplication.runningApplicationsWithBundleIdentifier_(BUNDLE_ID)
     # Filter out this process itself
     import os as _os
     my_pid = _os.getpid()
@@ -113,35 +134,32 @@ class Stem2AAFApp(rumps.App):
 
         self.convert_now_item = rumps.MenuItem("Convert to AAF", callback=self.convert_now)
         self.settings_item    = rumps.MenuItem("Settings",        callback=self.open_settings)
+        self.uninstall_item   = rumps.MenuItem("Uninstall Stem2AAF...", callback=self.launch_uninstaller)
         self.menu = [
             self.convert_now_item,
             None,
             self.settings_item,
             None,
+            self.uninstall_item,
             rumps.MenuItem("Quit Stem2AAF", callback=rumps.quit_application),
         ]
 
-        # Use the legacy "folder" key as both watch and output folder.
-        # The new SettingsWindow will migrate these to separate keys on first Save.
-        folder = self.cfg.get("folder", os.path.expanduser("~/Documents/Stem2AAF"))
         self.watcher = Watcher(
-            folder, folder, self.on_conversion_result, self.on_conversion_progress
+            self.watch_folder, self.output_folder,
+            self.on_conversion_result, self.on_conversion_progress,
         )
         self.watcher.start()
         self._settings_win = None  # kept alive to prevent GC
-        self._install_uninstaller_if_needed()
 
-        # Tracks pending-stem count across ticks to detect a "quiet"
-        # period (no new files for ~2 s) before firing an auto-conversion.
+        # One timer, not two. The pending-count refresh and the
+        # auto-convert check both used to run on their own 2-second timer,
+        # each doing a full directory scan, so an idle app listed the
+        # watched folder twice every two seconds forever. They now share a
+        # single scan per tick.
         self._auto_count_last = 0
-        self._auto_convert_timer = rumps.Timer(self._maybe_auto_convert, 2)
-        self._auto_convert_timer.start()
-
-        # Keeps the "Convert to AAF" label showing an accurate count of
-        # files currently waiting, rather than leaving it as a guess - see
-        # convert_now() for why this matters.
-        self._pending_label_timer = rumps.Timer(self._refresh_pending_label, 2)
-        self._pending_label_timer.start()
+        self._auto_quiet_ticks = 0
+        self._poll_timer = rumps.Timer(self._poll_folder, POLL_SECONDS)
+        self._poll_timer.start()
 
         # Drives the in-progress icon animation: from the instant of the
         # click, whichever bar is "next" blinks white/orange continuously
@@ -172,8 +190,29 @@ class Stem2AAFApp(rumps.App):
         self._progress = 0.0
         self._blink_index = 0  # drives the continuous next-bar blink while "filling"
         self._flash_index = 0  # drives the fixed-length completion flash while "flashing"
+        # Started by _begin_conversion and stopped by _animate_icon once
+        # the icon is back at rest, rather than running all day.
         self._icon_timer = rumps.Timer(self._animate_icon, 0.15)
-        self._icon_timer.start()
+
+    # -- Folders ------------------------------------------------------------
+
+    @property
+    def watch_folder(self) -> str:
+        """The folder the DAW exports stems into."""
+        return self.cfg.get("folder") or os.path.expanduser("~/Documents/Stem2AAF")
+
+    @property
+    def output_folder(self) -> str:
+        """
+        Where "<project> Converted vN" folders are written.
+
+        An empty setting means "next to the stems", which is the original
+        single-folder behaviour and stays the default. The Settings panel
+        has always offered a separate output folder; the app used to throw
+        that value away and write beside the stems no matter what was
+        chosen there.
+        """
+        return self.cfg.get("output_folder") or self.watch_folder
 
     # -- Settings -----------------------------------------------------------
 
@@ -183,8 +222,6 @@ class Stem2AAFApp(rumps.App):
         SettingsWindow expects.  Runs every time Settings is opened so
         the panel always reflects the latest saved state.
         """
-        folder = self.cfg.get("folder", os.path.expanduser("~/Documents/Stem2AAF"))
-
         # Build category list from the old separate keys:
         #   "category_order"  → [{name, enabled}, ...]
         #   "custom_keywords" → {name: [kw, ...]}
@@ -208,18 +245,35 @@ class Stem2AAFApp(rumps.App):
             categories = [dict(c) for c in DEFAULT_CATEGORIES]
 
         return {
-            "watch_folder":  folder,
-            "output_folder": folder,
-            "group_by_cat":  self.cfg.get("group_stems_by_category",     False),
+            "watch_folder":  self.watch_folder,
+            # Shown blank-as-"same as watch folder" is confusing in a path
+            # field, so the panel always shows the folder actually in use.
+            "output_folder": self.output_folder,
+            "group_by_cat":  self.cfg.get("group_stems_by_category",       False),
             "delete_stems":  self.cfg.get("delete_stems_after_conversion", False),
-            "auto_convert":  self.cfg.get("auto_convert",                 False),
+            "auto_convert":  self.cfg.get("auto_convert",                  False),
+            "launch_at_login": self.cfg.get("launch_at_login",             False),
             "categories":    categories,
         }
 
     def open_settings(self, _):
-        """Opens the unified Settings window."""
+        """
+        Opens the unified Settings window, or brings the existing one
+        forward if it's already open.
+
+        Without the reuse check, every click built a second panel and
+        dropped the reference to the first, leaving an orphaned window on
+        screen that still wrote to the same config.
+        """
+        if self._settings_win is not None and self._settings_win.is_open():
+            self._settings_win.show()
+            return
         settings_cfg = self._build_settings_config()
-        self._settings_win = SettingsWindow(settings_cfg, on_save=self._on_settings_save)
+        self._settings_win = SettingsWindow(
+            settings_cfg,
+            on_save=self._on_settings_save,
+            on_uninstall=lambda: self.launch_uninstaller(None),
+        )
         self._settings_win.show()
 
     def _on_settings_save(self, new_cfg: dict):
@@ -235,16 +289,30 @@ class Stem2AAFApp(rumps.App):
         happen dozens of times per settings session and could drop events
         mid-export.
         """
-        old_folder = self.cfg.get("folder", "")
-        folder     = new_cfg.get("watch_folder", old_folder)
+        old_watch  = self.watch_folder
+        old_output = self.output_folder
 
-        # Update legacy single-folder key (watcher still uses this).
-        self.cfg["folder"] = folder
+        self.cfg["folder"] = new_cfg.get("watch_folder") or old_watch
+
+        # Store the output folder only when it actually differs from the
+        # watched one, so the common "both the same" case keeps working
+        # even if the user later moves the watched folder.
+        chosen_output = new_cfg.get("output_folder") or ""
+        self.cfg["output_folder"] = "" if chosen_output == self.cfg["folder"] else chosen_output
 
         # Toggle flags — direct mapping.
         self.cfg["group_stems_by_category"]       = new_cfg.get("group_by_cat",  False)
         self.cfg["delete_stems_after_conversion"] = new_cfg.get("delete_stems", False)
         self.cfg["auto_convert"]                  = new_cfg.get("auto_convert", False)
+
+        # Launch at login is applied immediately, not just recorded: the
+        # LaunchAgent plist has to be written or removed for the checkbox
+        # to mean anything. Nothing called _set_launch_at_login before, so
+        # the setting existed in config and did nothing at all.
+        want_login = bool(new_cfg.get("launch_at_login", False))
+        if want_login != bool(self.cfg.get("launch_at_login", False)):
+            _set_launch_at_login(want_login)
+        self.cfg["launch_at_login"] = want_login
 
         # Persist categories in the old two-key format so existing builds
         # reading category_order / custom_keywords keep working.
@@ -255,92 +323,106 @@ class Stem2AAFApp(rumps.App):
 
         config.save(self.cfg)
 
-        if folder != old_folder:
-            self.watcher.restart(folder, folder)
+        if self.watch_folder != old_watch or self.output_folder != old_output:
+            self.watcher.restart(self.watch_folder, self.output_folder)
 
     # -- Uninstaller --------------------------------------------------------
 
-    def _install_uninstaller_if_needed(self):
-        """
-        Fallback: if the Uninstaller wasn't installed alongside the main app
-        (e.g. copied manually rather than via the DMG), this copies it from
-        inside this bundle to /Applications on first launch so it shows up
-        in Launchpad/Spotlight. The DMG already includes both apps side by
-        side, so this is rarely needed in practice.
-        """
-        target = "/Applications/Stem2AAF Uninstaller.app"
-        if os.path.isdir(target):
-            return
-        resource_path = NSBundle.mainBundle().resourcePath()
-        if not resource_path:
-            return
-        source = os.path.join(resource_path, "Stem2AAF Uninstaller.app")
-        if not os.path.isdir(source):
-            return
-        try:
-            shutil.copytree(source, target)
-        except Exception:
-            pass  # best-effort; the menu item fallback handles it if this fails
-
     def launch_uninstaller(self, _):
         """
-        Launches Stem2AAF Uninstaller.app from /Applications - where
-        build.sh and the DMG installer both place it alongside the main
-        app. Falls back to a copy bundled inside this app's own
-        Contents/Resources in case someone has an older build where the
-        uninstaller was nested rather than installed separately.
+        Confirms, then hands off to the uninstall script bundled in this
+        app's own Contents/Resources and quits.
+
+        This used to launch a whole second .app built by its own py2app
+        run: a complete copy of Python and PyObjC, about 20 MB, whose
+        entire job was to show one dialog and delete two folders. It also
+        left a stray copy of itself in /Applications when the nested copy
+        was the one that ran. The script does the same work, is a few
+        kilobytes, and can safely delete this app because it outlives it.
         """
-        candidate = "/Applications/Stem2AAF Uninstaller.app"
-        if not os.path.isdir(candidate):
-            resource_path = NSBundle.mainBundle().resourcePath()
-            candidate = os.path.join(resource_path, "Stem2AAF Uninstaller.app") if resource_path else ""
-        if not candidate or not os.path.isdir(candidate):
-            rumps.notification(
-                "Stem to AAF", "Uninstaller not found",
-                "Stem2AAF Uninstaller.app wasn't found in /Applications.",
+        script = _find_asset_path(UNINSTALL_SCRIPT_NAME)
+        if not script:
+            rumps.alert(
+                title="Couldn't uninstall",
+                message="The uninstall script is missing from this app bundle. "
+                        "Drag Stem2AAF.app to the Trash to remove it by hand.",
+                ok="OK",
             )
             return
-        subprocess.run(["open", candidate])
 
-    # -- Auto-convert -------------------------------------------------------
+        confirmed = rumps.alert(
+            title="Uninstall Stem2AAF?",
+            message="This removes the app, its settings, and its login-item entry.\n\n"
+                    "Your project folder and any .wav/.aaf files in it are NOT touched - "
+                    "only the app's own code and settings are removed.",
+            ok="Uninstall",
+            cancel="Cancel",
+        )
+        if confirmed != 1:
+            return
 
-    def _maybe_auto_convert(self, _timer):
+        bundle_path = NSBundle.mainBundle().bundlePath() or ""
+        subprocess.Popen(
+            ["/bin/bash", script, bundle_path, config.CONFIG_DIR, LAUNCH_AGENT_PATH],
+            start_new_session=True,
+        )
+        rumps.quit_application()
+
+    # -- Folder polling -----------------------------------------------------
+
+    def _poll_folder(self, _timer):
         """
-        Fires every 2 seconds. Converts automatically when: auto-convert
-        is on, stems are waiting, and the pending count hasn't changed
-        since the previous tick - meaning no new files have arrived in the
-        last ~2 s and the DAW is likely done exporting. Count-stability
-        rather than a fixed delay makes it robust across projects of any
-        size: a 50-track project that takes 2 minutes is treated the same
-        as a 4-track one.
+        One directory scan per tick, feeding both the menu label and the
+        auto-convert check.
 
-        Enabled from Settings → General → "Auto-convert when stems arrive".
+        Auto-convert waits for the waiting-stem count to hold completely
+        steady for AUTO_CONVERT_QUIET_SECONDS rather than for a single
+        tick. Bitwig can take well over two seconds between finishing one
+        track and creating the next when a track has a heavy plugin chain,
+        and the old single-tick check read that gap as "the export is
+        done" and converted mid-export.
         """
-        if not self.cfg.get("auto_convert", False):
-            return
         count = self.watcher.pending_stems_count()
-        if count == 0:
-            self._auto_count_last = 0
-            return
-        if count != self._auto_count_last:
-            self._auto_count_last = count
-            return
-        self._auto_count_last = 0
-        self._progress = 0.0
-        self._blink_index = 0
-        self._icon_state = "filling"
-        self.watcher.convert_pending_stems_now()
 
-    # -- Label refresh & icon animation ------------------------------------
-
-    def _refresh_pending_label(self, _timer):
-        count = self.watcher.pending_stems_count()
         if count > 0:
             self.convert_now_item.title = f"Convert to AAF ({count} waiting)"
         else:
             self.convert_now_item.title = "Convert to AAF"
 
+        if not self.cfg.get("auto_convert", False) or count == 0:
+            self._auto_count_last = count
+            self._auto_quiet_ticks = 0
+            return
+
+        # Never start a second conversion while one is already running.
+        if self._icon_state == "filling":
+            return
+
+        if count != self._auto_count_last:
+            self._auto_count_last = count
+            self._auto_quiet_ticks = 0
+            return
+
+        self._auto_quiet_ticks += 1
+        if self._auto_quiet_ticks * POLL_SECONDS < AUTO_CONVERT_QUIET_SECONDS:
+            return
+
+        self._auto_quiet_ticks = 0
+        self._auto_count_last = 0
+        self._begin_conversion()
+
+    # -- Icon animation -----------------------------------------------------
+
     def _animate_icon(self, _timer):
+        """
+        Ticks only while there is something to animate.
+
+        The timer used to run at 0.15 s forever, waking the app about
+        seven times a second around the clock to decide it had nothing to
+        draw - on a menu-bar app that sits idle all day that is pure
+        battery cost. It now stops itself once the icon is back at rest
+        and _begin_conversion restarts it.
+        """
         if self._icon_state == "filling":
             bars_earned = min(5, max(0, int(self._progress * 5)))
             if bars_earned >= 5:
@@ -355,31 +437,57 @@ class Stem2AAFApp(rumps.App):
             if self._flash_index >= self._FLASH_STEPS:
                 self._icon_state = "idle"
                 self.icon = self._resting_icon
+                self._stop_icon_timer()
                 return
             self.icon = self._fill_icons[5] if self._flash_index % 2 == 0 else self._resting_icon
             self._flash_index += 1
-        # "idle": nothing to do - the icon is already at rest.
+        else:
+            # Idle: the icon is already at rest, so there is nothing to
+            # draw and no reason to keep waking up.
+            self._stop_icon_timer()
+
+    def _stop_icon_timer(self):
+        try:
+            if self._icon_timer.is_alive():
+                self._icon_timer.stop()
+        except Exception:  # noqa: BLE001 - never let animation bookkeeping break a conversion
+            pass
+
+    def _begin_conversion(self):
+        """Resets the progress animation and asks the watcher to convert."""
+        self._progress = 0.0
+        self._blink_index = 0
+        self._icon_state = "filling"
+        try:
+            if not self._icon_timer.is_alive():
+                self._icon_timer.start()
+        except Exception:  # noqa: BLE001
+            pass
+        self.watcher.convert_pending_stems_now()
 
     # -- Conversion ---------------------------------------------------------
 
     def convert_now(self, _):
         """
-        Converts whatever stems have arrived so far into an AAF. This is
-        the only way conversion ever happens - there's no automatic timer,
-        since the DAW's render time per track depends on that track's own
-        plugin load and how much audio it contains, which makes any fixed
-        timeout an unreliable signal for "the export is actually done".
-        Click this once you can see (from the menu label above) that every
-        stem you expect has landed.
+        Converts whatever stems have arrived so far into an AAF.
+
+        This is the reliable way to convert: click it once you can see
+        from the menu label that every stem you expect has landed. The
+        DAW's render time per track depends on that track's own plugin
+        load and how much audio it contains, so no timer can tell "still
+        rendering" from "finished" with certainty. Auto-convert, off by
+        default, waits for the count to hold steady and is a convenience
+        on top of this, not a replacement for it.
+
+        Either way the watcher refuses to build an AAF from a batch where
+        any file is still being written, so a mistimed conversion reports
+        an error instead of quietly dropping tracks.
         """
         count = self.watcher.pending_stems_count()
         if count == 0:
             rumps.notification("Stem to AAF", "Nothing to convert", "No stems are currently waiting.")
             return
-        self._progress = 0.0
-        self._blink_index = 0
-        self._icon_state = "filling"
-        self.watcher.convert_pending_stems_now()
+        self._begin_conversion()
 
     # -- Watcher callbacks (run on a background thread) --------------------
 
@@ -387,6 +495,10 @@ class Stem2AAFApp(rumps.App):
         self._progress = fraction
 
     def on_conversion_result(self, label, success, message, log_dir=None, skip_log=False):
+        # Runs on the watcher's background thread, so this only ever sets
+        # plain values. The icon timer is already running whenever a
+        # conversion is in flight (see _begin_conversion), and it stops
+        # itself on the main thread once the completion flash is done.
         self._flash_index = 0
         self._icon_state = "flashing"
         if not skip_log:
@@ -414,8 +526,8 @@ def _set_launch_at_login(enabled: bool):
     environment variable, which nothing sets and previously made this
     silently do nothing even when the checkbox was turned on.
     """
-    label = "com.local.stem2aaf"
-    plist_path = os.path.expanduser(f"~/Library/LaunchAgents/{label}.plist")
+    label = BUNDLE_ID
+    plist_path = LAUNCH_AGENT_PATH
     if enabled:
         executable_path = NSBundle.mainBundle().executablePath()
         if not executable_path:
