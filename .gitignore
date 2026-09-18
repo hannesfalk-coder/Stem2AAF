@@ -1,0 +1,20 @@
+# Build artifacts
+build/
+dist/
+*.icns
+*.iconset/
+dmg_staging/
+dmg_temp.dmg
+Stem2AAF.dmg
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Local backups (pre-git manual snapshots)
+src_backup_*/
+backup_pre_cleanup_*/
+
+# macOS
+.DS_Store

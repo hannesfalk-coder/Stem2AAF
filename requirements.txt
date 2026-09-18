@@ -1,0 +1,6 @@
+pyaaf2==1.7.1
+watchdog>=6.0.0
+rumps>=0.4.0
+pyobjc-framework-WebKit>=10.0
+py2app>=0.28
+soundfile>=0.12
