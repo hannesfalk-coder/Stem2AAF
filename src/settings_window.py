@@ -528,31 +528,31 @@ function helpHTML() {
         <div class="step-num">1</div>
         <div class="step-body">
           <div class="step-title">Point the Watch Folder at your project</div>
-          <div class="step-desc">Its <strong>name becomes the project name</strong>, so use one folder per song.</div>
+          <div class="step-desc">Its <strong>name becomes the project name</strong>, so use one folder per project.</div>
           <div class="step-tag">⚙️ General → Watch Folder</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">Export every stem in one pass</div>
+          <div class="step-title">Convert every stem in one pass</div>
           <div class="step-desc">Export all the tracks together in a <strong>single</strong> operation. Separate exports may not line up, so a batch with mismatched sample rates is refused.</div>
-          <div class="step-tag">🎛 Your DAW → Export Audio</div>
+          <div class="step-tag">🎛 Your DAW → Export Audio to Watch Folder</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">3</div>
         <div class="step-body">
           <div class="step-title">Wait for the count, then convert</div>
-          <div class="step-desc">The menu item counts what's waiting, <em>Convert to AAF (24 waiting)</em>. When it matches what you exported, click it. <em>Auto-convert</em> in General fires once the count holds steady for __QUIET_SECONDS__ seconds.</div>
+          <div class="step-desc">The drop down menu item counts what's waiting, <em>Convert to AAF</em>. When it matches what you exported, click it. <em>Auto-convert</em> in General fires once the count holds steady for __QUIET_SECONDS__ seconds.</div>
           <div class="step-tag">🎚 Menu bar → Convert to AAF</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">4</div>
         <div class="step-body">
-          <div class="step-title">Import the AAF</div>
-          <div class="step-desc">Each conversion gets a numbered folder holding the <em>.aaf</em>, a log, and your stems unless you've set them to be deleted. One track per stem, all starting at zero, audio embedded.</div>
+          <div class="step-title">Import the AAF to your preferred software</div>
+          <div class="step-desc">Each conversion gets a numbered folder holding the <em>.AAF</em>, a log, and your stems unless you've set them to be deleted. Named after parent folder.</div>
           <div class="step-tag">📂 Output Folder → &lt;project&gt; Converted v1</div>
         </div>
       </div>
@@ -563,7 +563,7 @@ function helpHTML() {
     </div>
     <div class="help-tip">
       <div class="help-tip-title">Tip — Categories tidy the track list</div>
-      <div class="help-tip-body">Grouping orders tracks Drums, Bass, Guitar… and names them <em>Drums_Kick (01)</em>. It sorts and labels the tracks; it does not create busses.</div>
+      <div class="help-tip-body">Grouping orders tracks by category… and names them <em>Drums_Kick (01)</em>. It sorts and labels the tracks; it does not create busses.</div>
     </div>`;
 }
 
