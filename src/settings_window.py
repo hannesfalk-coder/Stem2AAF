@@ -38,6 +38,7 @@ from WebKit import WKUserContentController, WKWebView, WKWebViewConfiguration
 
 _TITLED        = 1    # NSWindowStyleMaskTitled
 _CLOSABLE      = 2    # NSWindowStyleMaskClosable
+_RESIZABLE     = 8    # NSWindowStyleMaskResizable
 _NONACTIVATING = 128  # NSWindowStyleMaskNonactivatingPanel
 
 
@@ -52,7 +53,15 @@ class _SettingsPanel(NSPanel):
     def canBecomeMainWindow(self):
         return False
 
-_W, _H = 680, 510   # panel width × height (title bar + content + footer)
+# Web-content size of the panel. This is passed as the window's content
+# rect, so it is the area the page gets; the title bar sits above it.
+#
+# Sized so no section has to scroll. The old 510 was set when General held
+# two groups; it now has three, and the tallest section (How to Use) needs
+# 689px at this width, so General arrived with a scrollbar down the side.
+# Measured heights at 720 wide: General 642, How to Use 689, About 438.
+# The window is resizable as well, so this only has to be a good default.
+_W, _H = 720, 700
 
 from version import VERSION, BUILD
 
@@ -153,7 +162,12 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
 .tog.on::after{transform:translateX(18px)}
 
 /* ── Categories section ── */
-.cat-split{display:flex;gap:0;height:100%;min-height:340px}
+/* flex:1 rather than height:100%. At 100% it claimed the detail pane's
+   full content box while the CATEGORY KEYWORDS label sat above it, so the
+   two together always overflowed by the height of that label and put a
+   scrollbar on a pane whose columns already scroll internally. */
+.cat-split{display:flex;gap:0;flex:1;min-height:340px}
+.detail.split-mode{display:flex;flex-direction:column}
 .cat-list-pane{width:150px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
   border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
 .cat-list-inner{flex:1;overflow-y:auto}
@@ -299,6 +313,10 @@ function nav(sec) { S.sec = sec; renderSidebar(); renderDetail(); }
 // ── Detail dispatcher ─────────────────────────────────────────────────────────
 function renderDetail() {
   const el = document.getElementById('detail');
+  // Categories is the one section laid out as two full-height columns;
+  // it needs the detail pane to be a flex column so .cat-split can take
+  // exactly the space the section label leaves over.
+  el.classList.toggle('split-mode', S.sec === 'categories');
   if      (S.sec === 'general')    el.innerHTML = generalHTML();
   else if (S.sec === 'categories') { el.innerHTML = categoriesHTML(); if (S.addingCat) setTimeout(() => document.getElementById('cl-new')?.focus(), 0); }
   else if (S.sec === 'help')       el.innerHTML = helpHTML();
@@ -694,9 +712,17 @@ class SettingsWindow:
 
         # NSPanel
         panel = _SettingsPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            frame, _TITLED | _CLOSABLE | _NONACTIVATING, NSBackingStoreBuffered, False
+            frame, _TITLED | _CLOSABLE | _RESIZABLE | _NONACTIVATING,
+            NSBackingStoreBuffered, False
         )
         panel.setTitle_("Stem2AAF Settings")
+        # Resizable, so the panel can adapt if a future section grows or a
+        # display is short. The floor is the width the two-pane Categories
+        # layout needs before its columns start crowding each other.
+        panel.setContentMinSize_((620, 460))
+        # The webview has to follow the window rather than staying at its
+        # initial frame size.
+        webview.setAutoresizingMask_(2 | 16)  # NSViewWidthSizable | NSViewHeightSizable
         panel.setContentView_(webview)
         panel.setReleasedWhenClosed_(False)
         panel.center()
