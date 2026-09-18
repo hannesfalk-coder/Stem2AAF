@@ -414,7 +414,7 @@ function categoriesHTML() {
             <div class="cd-name">${esc(cat.name)}</div>
             <div class="cd-meta">${cat.keywords.length} keyword${cat.keywords.length!==1?'s':''} · ${cat.enabled?'Enabled':'Disabled'}</div>
           </div>
-          ${DEFAULT_CATS.find(c=>c.name===cat.name) ? `<button class="change-btn" style="font-size:11px;padding:3px 9px;margin-top:2px" onclick="resetCatKws(${sel})" title="Restore default keywords">Reset</button>` : ''}
+          ${DEFAULT_CATS.find(c=>c.name===cat.name) ? `<button class="cl-ft-btn" style="margin-top:2px;font-size:13px" onclick="resetCatKws(${sel})" title="Restore default keywords">↺</button>` : ''}
         </div>
         <div class="cd-body">
           ${chips || '<span style="font-size:13px;color:var(--t3)">No keywords — add one below</span>'}
