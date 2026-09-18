@@ -545,12 +545,19 @@ function aboutHTML() {
   return `
     <div class="about-wrap">
       <div class="app-icon">
-        <svg viewBox="0 0 40 40" width="48" height="48" fill="none">
-          <rect x="8"  y="20" width="6" height="12" rx="2" fill="rgba(255,255,255,.9)"/>
-          <rect x="17" y="14" width="6" height="18" rx="2" fill="rgba(255,255,255,.9)"/>
-          <rect x="26" y="8"  width="6" height="24" rx="2" fill="rgba(255,255,255,.9)"/>
-          <path d="M36 34L38 32L38 36z" fill="rgba(255,255,255,.75)"/>
-          <path d="M34 34h6" stroke="rgba(255,255,255,.9)" stroke-width="1.5" stroke-linecap="round"/>
+        <!-- The app's own mark: five centred bars, short-tall-tallest-tall-short.
+             Geometry traced from src/assets/app_icon_source.png and scaled from
+             its 1024px canvas to this 40-unit viewBox, so the About panel shows
+             the same logo as the Dock and menu bar rather than a different
+             drawing. Colours are unchanged: white bars on the orange tile. -->
+        <svg viewBox="0 0 40 40" width="48" height="48" fill="none" aria-label="Stem2AAF">
+          <g fill="rgba(255,255,255,.9)">
+            <rect x="5.59"  y="14.88" width="4.06" height="10.27" rx="2.03"/>
+            <rect x="11.80" y="10.08" width="4.02" height="19.88" rx="2.01"/>
+            <rect x="18.01" y="3.98"  width="4.02" height="32.07" rx="2.01"/>
+            <rect x="24.22" y="10.08" width="4.02" height="19.88" rx="2.01"/>
+            <rect x="30.39" y="14.88" width="4.06" height="10.27" rx="2.03"/>
+          </g>
         </svg>
       </div>
       <div class="app-name">Stem2AAF</div>

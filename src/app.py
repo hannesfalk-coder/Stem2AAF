@@ -134,13 +134,14 @@ class Stem2AAFApp(rumps.App):
 
         self.convert_now_item = rumps.MenuItem("Convert to AAF", callback=self.convert_now)
         self.settings_item    = rumps.MenuItem("Settings",        callback=self.open_settings)
-        self.uninstall_item   = rumps.MenuItem("Uninstall Stem2AAF...", callback=self.launch_uninstaller)
+        # Uninstall lives in Settings -> Application, not here. It is a rare,
+        # destructive action and doesn't belong one slip of the mouse away
+        # from "Convert to AAF" in a menu opened many times a session.
         self.menu = [
             self.convert_now_item,
             None,
             self.settings_item,
             None,
-            self.uninstall_item,
             rumps.MenuItem("Quit Stem2AAF", callback=rumps.quit_application),
         ]
 
@@ -332,6 +333,8 @@ class Stem2AAFApp(rumps.App):
         """
         Confirms, then hands off to the uninstall script bundled in this
         app's own Contents/Resources and quits.
+
+        Reached from Settings -> Application -> Uninstall.
 
         This used to launch a whole second .app built by its own py2app
         run: a complete copy of Python and PyObjC, about 20 MB, whose
