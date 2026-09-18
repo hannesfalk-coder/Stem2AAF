@@ -15,8 +15,8 @@ produces an error rather than an AAF quietly missing tracks.
 
 Build into a double-clickable .app with `python3 setup.py py2app` (see
 setup.py in this folder) - that step must be run on a Mac. To remove it
-later, use "Uninstall Stem2AAF..." in its own menu, which runs the
-uninstall script bundled in Contents/Resources.
+later, use Settings -> Application -> Uninstall, which runs the uninstall
+script bundled in Contents/Resources.
 """
 
 import datetime

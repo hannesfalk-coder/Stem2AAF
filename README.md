@@ -120,7 +120,7 @@ Developer certificate. To open it anyway: **right-click the app → Open →
 Open** (only needed once).
 
 A small icon will appear in your menu bar. Clicking it gives you
-**Convert to AAF**, **Settings**, **Uninstall Stem2AAF…**, and **Quit**.
+**Convert to AAF**, **Settings**, and **Quit**.
 
 ## Settings
 
@@ -166,7 +166,9 @@ applies each change immediately - there's no Save button.
 **Application**
 
 - **Launch at login** — keeps the app running automatically.
-- **Uninstall Stem2AAF** — same as the menu item.
+- **Uninstall Stem2AAF** — removes the app. This is the only place it
+  lives; it's deliberately not in the menu bar dropdown, which you open
+  constantly to reach Convert to AAF.
 
 ## Everyday use
 
@@ -210,9 +212,9 @@ treated as a hard stop.
 
 ## Uninstalling
 
-Choose **"Uninstall Stem2AAF…"** from the menu bar icon, or the matching
-button in Settings → General. After a confirmation dialog, it quits the
-app and removes the app bundle, its settings, and its login-item entry.
+Open **Settings → Application** and click **Uninstall…**. After a
+confirmation dialog, it quits the app and removes the app bundle, its
+settings, and its login-item entry.
 Your project folder and everything in it is never touched - only the app's
 own code and config get removed.
 
