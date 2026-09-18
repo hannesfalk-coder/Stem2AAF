@@ -171,7 +171,7 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
    scrollbar on a pane whose columns already scroll internally. */
 .cat-split{display:flex;gap:0;flex:1;min-height:340px}
 .detail.split-mode{display:flex;flex-direction:column}
-.cat-list-pane{width:150px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
+.cat-list-pane{width:176px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
   border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
 .cat-list-inner{flex:1;overflow-y:auto}
 .cl-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;
@@ -179,13 +179,20 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
 .cl-row:last-child{border-bottom:none}
 .cl-row:hover{background:var(--chip-bg)}
 .cl-row.active{background:rgba(0,0,0,.06)}
+/* Category order is not cosmetic: it decides the order the groups appear
+   in the AAF, and it breaks ties when a filename matches keywords from
+   two categories. Rows are draggable, with the footer arrows as the
+   discoverable, always-works alternative. */
+.cl-row{cursor:grab}
+.cl-row.dragging{opacity:.5;cursor:grabbing;background:rgba(0,122,255,.10)}
 .cl-dot{width:9px;height:9px;border-radius:50%;background:#FF9500;flex-shrink:0;cursor:pointer;transition:opacity .1s}.cl-dot:hover{opacity:.7}
 .cl-dot.off{background:var(--t3)}
 .cl-row.active .cl-dot{background:#FF9500}
 .cl-row.active .cl-dot.off{background:var(--t3)}
 .cl-name{flex:1;font-size:13px;font-weight:500;color:var(--t1)}
 .cl-row.active .cl-name{color:var(--t1)}
-.cl-footer{padding:7px 10px;border-top:1px solid var(--sep);display:flex;gap:5px}
+.cl-footer{padding:7px 10px;border-top:1px solid var(--sep);display:flex;gap:4px}
+.cl-ft-btn[disabled]{opacity:.35;cursor:default}
 .cl-ft-btn{width:26px;height:20px;background:var(--bg-2);border:1px solid var(--sep-s);
   border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;
   color:var(--t2);font-size:16px;line-height:1;font-family:var(--font);transition:all .1s}
@@ -268,6 +275,7 @@ const DEFAULT_CATS = __DEFAULT_CATS__;
 S.sec      = S.sec      || 'general';
 S.selCat   = S.selCat   || 0;
 S.addingCat = false;
+S.dragCat   = -1;   // index of the category row currently being dragged
 
 const XSvg = `<svg viewBox="0 0 8 8" width="8" height="8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
@@ -404,7 +412,7 @@ function categoriesHTML() {
   const cat  = cats[sel] || cats[0];
 
   const listRows = cats.map((c, i) => `
-    <div class="cl-row${i===sel?' active':''}" data-idx="${i}" onclick="selCat(${i})">
+    <div class="cl-row${i===sel?' active':''}${i===S.dragCat?' dragging':''}" data-idx="${i}" onmousedown="catDragStart(event,${i})" onclick="selCat(${i})">
       <span class="cl-dot${c.enabled?'':' off'}" onclick="event.stopPropagation();toggleCat(${i})" title="${c.enabled?'Click to disable':'Click to enable'}"></span>
       <span class="cl-name">${esc(c.name)}</span>
     </div>`).join('');
@@ -426,8 +434,10 @@ function categoriesHTML() {
           ${addRow}
         </div>
         <div class="cl-footer">
-          <button class="cl-ft-btn" onclick="S.addingCat=true;renderDetail()">+</button>
-          <button class="cl-ft-btn danger" onclick="rmCat(${sel})">−</button>
+          <button class="cl-ft-btn" onclick="S.addingCat=true;renderDetail()" title="Add a category">+</button>
+          <button class="cl-ft-btn danger" onclick="rmCat(${sel})" title="Remove this category">−</button>
+          <button class="cl-ft-btn" onclick="moveCat(-1)" title="Move up" ${sel<=0?'disabled':''} style="font-size:12px">↑</button>
+          <button class="cl-ft-btn" onclick="moveCat(1)" title="Move down" ${sel>=cats.length-1?'disabled':''} style="font-size:12px">↓</button>
           <button class="cl-ft-btn" onclick="resetAllCats()" title="Reset all categories to defaults" style="margin-left:auto;font-size:13px">↺</button>
         </div>
       </div>
@@ -450,8 +460,13 @@ function categoriesHTML() {
     </div>`;
 }
 
-function selCat(i)    { S.selCat = i; renderDetail(); }
-function toggleCat(i) { S.categories[i].enabled = !S.categories[i].enabled; S.selCat = i; renderDetail(); autoSave(); }
+function selCat(i)    { if (_wasJustDragging()) return; S.selCat = i; renderDetail(); }
+function toggleCat(i) {
+  // Ignore the click that lands when a drag is released over a row, so
+  // reordering never flips a category's enabled state by accident.
+  if (_wasJustDragging()) return;
+  S.categories[i].enabled = !S.categories[i].enabled; S.selCat = i; renderDetail(); autoSave();
+}
 function rmKw(ki)     { S.categories[S.selCat].keywords.splice(ki, 1); renderDetail(); autoSave(); }
 function addKw() {
   const el = document.getElementById('cd-kwin');
@@ -483,6 +498,86 @@ function resetAllCats() {
   S.selCat = 0;
   renderDetail(); autoSave();
 }
+
+// ── Category reordering ──────────────────────────────────────────────────────
+// Order matters to the converter twice over: it sets the order the groups
+// appear in the AAF, and it decides the winner when a filename matches
+// keywords from more than one category. There was no way to change it from
+// here at all, despite the config storing it and the converter reading it.
+
+function moveCat(delta) {
+  const from = S.selCat, to = from + delta;
+  if (to < 0 || to >= S.categories.length) return;
+  S.categories.splice(to, 0, S.categories.splice(from, 1)[0]);
+  S.selCat = to;
+  renderDetail(); autoSave();
+}
+
+let _dragCat = null;      // {idx, startY, moved}
+let _catDragEndedAt = 0;  // when the last real drag finished, see _catDragUp
+
+function catDragStart(event, idx) {
+  if (event.button !== 0) return;           // left button only
+  if (event.target.closest('.cl-dot')) return;  // that's the enable toggle
+  _dragCat = {idx, startY: event.clientY, moved: false};
+  document.addEventListener('mousemove', _catDragMove);
+  document.addEventListener('mouseup',   _catDragUp);
+}
+
+function _catDragMove(event) {
+  if (!_dragCat) return;
+  // Only treat it as a drag past a small threshold, so an ordinary click
+  // still selects the row instead of being eaten as a zero-distance drag.
+  if (!_dragCat.moved) {
+    if (Math.abs(event.clientY - _dragCat.startY) < 4) return;
+    _dragCat.moved = true;
+    S.dragCat = _dragCat.idx;
+    renderDetail();
+  }
+  event.preventDefault();
+
+  const rows = [...document.querySelectorAll('.cl-row')];
+  if (!rows.length) return;
+  let target = rows.findIndex(r => {
+    const b = r.getBoundingClientRect();
+    return event.clientY >= b.top && event.clientY <= b.bottom;
+  });
+  // Dragging past either end pins to that end rather than doing nothing.
+  if (target < 0) {
+    if (event.clientY < rows[0].getBoundingClientRect().top) target = 0;
+    else if (event.clientY > rows[rows.length - 1].getBoundingClientRect().bottom) target = rows.length - 1;
+    else return;
+  }
+  if (target === _dragCat.idx) return;
+
+  // Keep the selection on whichever category it was on, by identity
+  // rather than by index, since the indices are about to shift.
+  const selected = S.categories[S.selCat];
+  S.categories.splice(target, 0, S.categories.splice(_dragCat.idx, 1)[0]);
+  S.selCat = S.categories.indexOf(selected);
+  _dragCat.idx = target;
+  S.dragCat = target;
+  renderDetail();
+}
+
+function _catDragUp() {
+  document.removeEventListener('mousemove', _catDragMove);
+  document.removeEventListener('mouseup',   _catDragUp);
+  const didMove = !!(_dragCat && _dragCat.moved);
+  _dragCat = null;
+  S.dragCat = -1;
+  if (didMove) {
+    // Letting go over a row would otherwise also count as a click on it.
+    // A timestamp rather than a one-shot capture listener: releasing
+    // outside the list produces no click at all, which left that listener
+    // armed indefinitely and eating some unrelated click much later.
+    _catDragEndedAt = Date.now();
+    autoSave();
+  }
+  renderDetail();
+}
+
+function _wasJustDragging() { return Date.now() - _catDragEndedAt < 250; }
 
 // ── Keyword drag-and-drop (mouse events — WKWebView safe) ────────────────────
 function kwDragStart(event, catIdx, kwIdx) {

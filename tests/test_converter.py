@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 import aaf2  # noqa: E402
 from converter import (  # noqa: E402
+    _CATEGORY_KEYWORDS,
     ConversionError,
     _normalize_wav,
     _rename_stem_track,
@@ -235,6 +236,49 @@ class Conversion(unittest.TestCase):
             out = os.path.join(d, "out.aaf")
             stems_to_aaf(paths, out)
             self.assertEqual(slot_names(out)[-1], "Master")
+
+    def test_category_order_decides_track_order(self):
+        """The Categories list is reorderable, and that order has to reach
+        the AAF. Nothing covered this while there was no way to change it."""
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("01 Kick.wav", "02 Reese Bass.wav", "03 Lead Vocal.wav"):
+                write_stem(os.path.join(d, n))
+            paths = sorted(os.path.join(d, n) for n in os.listdir(d) if n.endswith(".wav"))
+            custom = {name: kws for name, kws in _CATEGORY_KEYWORDS}
+            default = [{"name": n, "enabled": True} for n, _ in _CATEGORY_KEYWORDS]
+
+            out = os.path.join(d, "a.aaf")
+            stems_to_aaf(paths, out, group_by_category=True,
+                         category_order=default, custom_keywords=custom)
+            self.assertEqual(
+                slot_names(out),
+                ["Drums_Kick (01)", "Bass_Reese Bass (02)", "Vocal_Lead Vocal (03)"],
+            )
+
+            moved = [{"name": "Vocal", "enabled": True}] + [
+                c for c in default if c["name"] != "Vocal"
+            ]
+            out2 = os.path.join(d, "b.aaf")
+            stems_to_aaf(paths, out2, group_by_category=True,
+                         category_order=moved, custom_keywords=custom)
+            self.assertEqual(
+                slot_names(out2),
+                ["Vocal_Lead Vocal (03)", "Drums_Kick (01)", "Bass_Reese Bass (02)"],
+            )
+
+    def test_disabled_category_sorts_last_and_is_unmatched(self):
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("01 Kick.wav", "02 Reese Bass.wav"):
+                write_stem(os.path.join(d, n))
+            paths = sorted(os.path.join(d, n) for n in os.listdir(d) if n.endswith(".wav"))
+            custom = {name: kws for name, kws in _CATEGORY_KEYWORDS}
+            order = [{"name": n, "enabled": n != "Bass"} for n, _ in _CATEGORY_KEYWORDS]
+            out = os.path.join(d, "c.aaf")
+            stems_to_aaf(paths, out, group_by_category=True,
+                         category_order=order, custom_keywords=custom)
+            names = slot_names(out)
+            self.assertEqual(names[0], "Drums_Kick (01)")
+            self.assertEqual(names[-1], "Unmatched_Reese Bass (02)")
 
     def test_progress_runs_from_zero_to_one(self):
         with tempfile.TemporaryDirectory() as d:
