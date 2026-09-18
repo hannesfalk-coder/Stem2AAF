@@ -59,10 +59,13 @@ class _SettingsPanel(NSPanel):
 # Sized so no section has to scroll. The old 510 was set when General held
 # two groups; it now has three, and the tallest section (How to Use) needs
 # 689px at this width, so General arrived with a scrollbar down the side.
-# Measured heights at 720 wide: General 642, How to Use 689, About 438.
+# Measured heights at 720 wide: How to Use 750, General 642, About 438.
+# The 40px over the tallest is deliberate slack: these numbers come from a
+# browser, and WKWebView's text metrics need not agree to the pixel.
 # The window is resizable as well, so this only has to be a good default.
-_W, _H = 720, 700
+_W, _H = 720, 790
 
+from config import AUTO_CONVERT_QUIET_SECONDS
 from version import VERSION, BUILD
 
 # Single source of truth: the converter's keyword table is what actually runs
@@ -233,6 +236,8 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
   border:1px solid var(--sep);border-radius:9px}
 .help-tip-title{font-size:12px;font-weight:600;color:var(--t2);margin-bottom:3px}
 .help-tip-body{font-size:12px;color:var(--t2);line-height:1.55}
+.help-tip.key{border-color:rgba(255,149,0,.45);background:rgba(255,149,0,.07)}
+.help-tip.key .help-tip-title{color:var(--t1)}
 
 /* ── About section ── */
 .about-wrap{display:flex;flex-direction:column;align-items:center;padding:32px 20px;text-align:center}
@@ -363,7 +368,7 @@ function generalHTML() {
       <div class="sr sr-toggle">
         <div class="sr-text" style="flex:1">
           <div class="sr-title">Auto-convert when stems arrive</div>
-          <div class="sr-desc">Build an AAF once the number of waiting stems has held steady for 12 seconds. A batch where any file is still being written is never converted — you'll get an error instead of an AAF missing tracks.</div>
+          <div class="sr-desc">Build an AAF once the number of waiting stems has held steady for __QUIET_SECONDS__ seconds. A batch where any file is still being written is never converted — you'll get an error instead of an AAF missing tracks.</div>
         </div>
         <button class="tog${S.auto_convert?' on':''}" onclick="S.auto_convert=!S.auto_convert;this.classList.toggle('on',S.auto_convert);autoSave()"></button>
       </div>
@@ -522,39 +527,43 @@ function helpHTML() {
       <div class="help-step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <div class="step-title">Set your Watch Folder</div>
-          <div class="step-desc">In General, point the Watch Folder at wherever your DAW exports its stems. Stem2AAF monitors this folder automatically — no action needed after setup.</div>
+          <div class="step-title">Point the Watch Folder at your project</div>
+          <div class="step-desc">Its <strong>name becomes the project name</strong>, so use one folder per song.</div>
           <div class="step-tag">⚙️ General → Watch Folder</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">Export your stems</div>
-          <div class="step-desc">From your DAW, export each track or group as a separate audio stem into the Watch Folder.</div>
-          <div class="step-tag">🎛 Your DAW → Export stems</div>
+          <div class="step-title">Export every stem in one pass</div>
+          <div class="step-desc">Export all the tracks together in a <strong>single</strong> operation. Separate exports may not line up, so a batch with mismatched sample rates is refused.</div>
+          <div class="step-tag">🎛 Your DAW → Export Audio</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">3</div>
         <div class="step-body">
-          <div class="step-title">Click Convert to AAF</div>
-          <div class="step-desc">Click the Stem2AAF icon in the menu bar and choose <strong>Convert to AAF</strong>. The app reads every stem in the Watch Folder and bundles them into a single .aaf file with embedded audio.</div>
-          <div class="step-tag">⌘K  Convert to AAF</div>
+          <div class="step-title">Wait for the count, then convert</div>
+          <div class="step-desc">The menu item counts what's waiting, <em>Convert to AAF (24 waiting)</em>. When it matches what you exported, click it. <em>Auto-convert</em> in General fires once the count holds steady for __QUIET_SECONDS__ seconds.</div>
+          <div class="step-tag">🎚 Menu bar → Convert to AAF</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">4</div>
         <div class="step-body">
-          <div class="step-title">Import the AAF into your favourite app</div>
-          <div class="step-desc">The finished .aaf appears in your Output Folder. Import it into your favourite app — all stems land on separate tracks, ready to mix.</div>
-          <div class="step-tag">📂 Output Folder → Import into your favourite app</div>
+          <div class="step-title">Import the AAF</div>
+          <div class="step-desc">Each conversion gets a numbered folder holding the <em>.aaf</em>, a log, and your stems unless you've set them to be deleted. One track per stem, all starting at zero, audio embedded.</div>
+          <div class="step-tag">📂 Output Folder → &lt;project&gt; Converted v1</div>
         </div>
       </div>
     </div>
+    <div class="help-tip key">
+      <div class="help-tip-title">Nothing is ever converted halfway</div>
+      <div class="help-tip-body">If any file is still being written, <strong>nothing</strong> is converted: you get an error naming it, and no AAF. Wait for the export to finish, then convert again.</div>
+    </div>
     <div class="help-tip">
-      <div class="help-tip-title">Tip — Categories speed up mixing</div>
-      <div class="help-tip-body">Enable <em>Group stems by category</em> in General and configure your keywords in Categories. Tracks are named and grouped automatically, so Drums, Bass, and Vocals each arrive on their own bus in your app.</div>
+      <div class="help-tip-title">Tip — Categories tidy the track list</div>
+      <div class="help-tip-body">Grouping orders tracks Drums, Bass, Guitar… and names them <em>Drums_Kick (01)</em>. It sorts and labels the tracks; it does not create busses.</div>
     </div>`;
 }
 
@@ -609,7 +618,9 @@ renderDetail();
 </html>"""
 
 # Replace version string at load time
-_HTML = _HTML.replace("${VERSION}", VERSION).replace("${BUILD}", BUILD)
+_HTML = (_HTML.replace("${VERSION}", VERSION)
+              .replace("${BUILD}", BUILD)
+              .replace("__QUIET_SECONDS__", str(AUTO_CONVERT_QUIET_SECONDS)))
 
 
 # ── Message handler ───────────────────────────────────────────────────────────

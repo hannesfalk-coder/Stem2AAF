@@ -2,6 +2,17 @@ import json
 import os
 import tempfile
 
+# How long the number of waiting stems must hold completely steady before
+# auto-convert fires, in seconds. Lives here because app.py acts on it and
+# settings_window.py quotes it to the user in two places; a second
+# hardcoded copy would drift the moment this changed.
+#
+# A single 2-second tick, which is what this used to be, is shorter than
+# the gap Bitwig leaves between finishing one track and creating the next
+# when a track carries a heavy plugin chain, so auto-convert could fire in
+# the middle of an export.
+AUTO_CONVERT_QUIET_SECONDS = 12
+
 CONFIG_DIR = os.path.expanduser("~/Library/Application Support/Stem2AAF")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
 

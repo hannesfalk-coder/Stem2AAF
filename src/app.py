@@ -27,6 +27,7 @@ import rumps
 from AppKit import NSBundle
 
 import config
+from config import AUTO_CONVERT_QUIET_SECONDS
 from settings_window import SettingsWindow, DEFAULT_CATEGORIES
 from watcher import Watcher
 
@@ -35,16 +36,6 @@ LOG_FILENAME = "Stem2AAF_log.txt"
 # How often the menu-bar app looks at the watched folder, in seconds. Drives
 # both the "(N waiting)" label and the auto-convert quiet check.
 POLL_SECONDS = 2
-
-# How long the number of waiting stems must hold completely steady before
-# auto-convert fires, in seconds. The old value was a single 2-second tick,
-# which is shorter than the gap Bitwig leaves between finishing one track
-# and creating the next when a track carries a heavy plugin chain - so
-# auto-convert could fire in the middle of an export. The watcher refuses to
-# build a partial AAF now, so the failure mode is a clear error rather than a
-# silently incomplete file, but the wait still needs to be long enough that
-# a normal export doesn't trip it.
-AUTO_CONVERT_QUIET_SECONDS = 12
 
 UNINSTALL_SCRIPT_NAME = "uninstall.sh"
 
