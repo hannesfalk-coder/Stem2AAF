@@ -34,13 +34,21 @@ fi
 ahead=$(git rev-list --count origin/main..main 2>/dev/null || echo 0)
 if [ "$ahead" -gt 0 ]; then
     echo "→ Pushing $ahead commit(s) to GitHub…"
-    if git push 2>&1 | sed 's/^/   /'; then
+    # GIT_TERMINAL_PROMPT=0 makes git fail instead of stopping to ask for a
+    # username and password. Without it a missing credential HANGS here,
+    # waiting on input, and the build never runs - which defeats the whole
+    # point of treating push and build as independent.
+    if GIT_TERMINAL_PROMPT=0 git push 2>&1 | sed 's/^/   /'; then
         echo "   ✓ Pushed"
     else
         echo ""
-        echo "   ⚠️  Push failed — carrying on with the build."
-        echo "      Usually means credentials. Open GitHub Desktop and"
-        echo "      click Push origin, or just try this again later."
+        echo "   ⚠️  Push skipped — no saved GitHub credential."
+        echo "      Building anyway; your code is safe locally either way."
+        echo ""
+        echo "      To fix it once and for all, run this in Terminal:"
+        echo "         git config --global credential.helper osxkeychain"
+        echo "      then push once (here or in GitHub Desktop). macOS will"
+        echo "      remember it and this step goes quiet from then on."
     fi
 else
     echo "→ Nothing to push, GitHub is up to date."
