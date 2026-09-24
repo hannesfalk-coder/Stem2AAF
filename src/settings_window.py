@@ -207,6 +207,43 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
 .cat-heads .h-cat{width:176px;flex-shrink:0}
 .cat-heads .h-kw{flex:1;margin-left:10px}
 .cat-heads .sec-label{margin:0 0 8px}
+
+/* ── Presets ──
+   A preset is the whole category list: names, order, enabled state and
+   keywords. Deliberately NOT the folders or the conversion toggles -
+   those describe this machine, the categories describe the kind of
+   project. A preset that silently re-pointed the output folder would be
+   a nasty surprise.
+   The control sits directly above the two panes because that is what
+   says what it governs: everything below it, nothing else. */
+.preset-row{display:flex;align-items:center;gap:9px;margin-bottom:14px;
+  position:relative;flex-shrink:0}
+.preset-lab{font-size:12px;color:var(--t2);flex-shrink:0}
+.preset-pop{width:252px;display:flex;align-items:center;justify-content:space-between;
+  gap:8px;background:var(--bg-el);border:1px solid var(--sep-s);border-radius:7px;
+  padding:5px 9px;font-size:13px;font-family:var(--font);color:var(--t1);
+  cursor:pointer;text-align:left;box-shadow:0 1px 1.5px rgba(0,0,0,.05)}
+.preset-pop:hover{background:var(--bg-2)}
+/* The word that makes presets trustworthy: your edits are live but not
+   saved, and Save is suddenly the interesting menu item. */
+.preset-mod{color:var(--t3)}
+.preset-chev{display:flex;flex-direction:column;gap:2px;opacity:.5;flex-shrink:0}
+.preset-chev i{border-left:3.5px solid transparent;border-right:3.5px solid transparent;display:block}
+.preset-chev i:first-child{border-bottom:4px solid currentColor}
+.preset-chev i:last-child{border-top:4px solid currentColor}
+.preset-menu{position:absolute;top:calc(100% + 3px);left:58px;z-index:60;min-width:252px;
+  background:var(--bg-el);border:1px solid var(--sep-s);border-radius:8px;padding:4px;
+  box-shadow:0 10px 28px rgba(0,0,0,.28)}
+.pm-item{display:flex;align-items:center;gap:7px;padding:5px 9px;border-radius:5px;
+  font-size:13px;color:var(--t1);cursor:pointer;white-space:nowrap}
+.pm-item:hover{background:var(--chip-bg)}
+.pm-item.dim{color:var(--t3);cursor:default}
+.pm-item.dim:hover{background:none}
+.pm-tick{width:11px;flex-shrink:0;font-size:10px;color:var(--t2)}
+.pm-sep{height:1px;background:var(--sep);margin:4px 6px}
+.preset-input{width:252px;font-size:13px;font-family:var(--font);color:var(--t1);
+  background:var(--bg-el);border:1px solid var(--sep-s);border-radius:7px;
+  padding:5px 9px;outline:none;-webkit-user-select:auto;user-select:auto}
 .cat-list-pane{width:176px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
   border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
 .cat-list-inner{flex:1;overflow-y:auto}
@@ -341,6 +378,10 @@ const DEFAULT_CATS = __DEFAULT_CATS__;
 S.sec      = S.sec      || 'general';
 S.selCat   = S.selCat   || 0;
 S.addingCat = false;
+S.presets      = S.presets || {};          // name -> categories
+S.activePreset = S.activePreset || 'Default Keywords';
+S.presetMenu   = false;                    // menu open? UI only, never saved
+S.presetEdit   = null;                     // 'save' | 'rename' | null
 S.dragCat   = -1;   // index of the category row currently being dragged
 
 const XSvg = `<svg viewBox="0 0 8 8" width="8" height="8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
@@ -506,6 +547,122 @@ function openFolder(key) {
   post({action: 'open_folder', key: key});
 }
 
+// ── Presets ───────────────────────────────────────────────────────────────────
+// A preset is the whole category list - names, order, enabled state and
+// keywords - saved under a name. S.presets maps name -> categories.
+// DEFAULT_NAME is not stored in there: it always means the converter's own
+// table, so there is a way back that cannot be deleted or edited away.
+
+const DEFAULT_PRESET = 'Default Keywords';
+
+function presetBaseline() {
+  return S.activePreset === DEFAULT_PRESET
+    ? DEFAULT_CATS
+    : (S.presets[S.activePreset] || DEFAULT_CATS);
+}
+
+// Compared as JSON rather than by a dirty flag: a flag has to be cleared
+// everywhere the categories change, and one missed spot leaves the panel
+// lying about whether your edits are saved.
+function presetDirty() {
+  return JSON.stringify(S.categories) !== JSON.stringify(presetBaseline());
+}
+
+function presetRowHTML() {
+  if (S.presetEdit) {                      // naming a new one, or renaming
+    return `
+      <div class="preset-row">
+        <span class="preset-lab">${S.presetEdit === 'rename' ? 'Rename to:' : 'Save as:'}</span>
+        <input class="preset-input" id="preset-name" placeholder="Preset name…"
+               value="${S.presetEdit === 'rename' ? esc(S.activePreset) : ''}"
+               onkeydown="presetNameKey(event)">
+      </div>`;
+  }
+
+  const names = Object.keys(S.presets).sort((a, b) => a.localeCompare(b));
+  const dirty = presetDirty();
+  const item  = n => `<div class="pm-item" onclick="applyPreset(${JSON.stringify(n).replace(/"/g,'&quot;')})">
+      <span class="pm-tick">${n === S.activePreset ? '✓' : ''}</span>${esc(n)}</div>`;
+
+  const menu = S.presetMenu ? `
+    <div class="preset-menu" id="preset-menu">
+      ${item(DEFAULT_PRESET)}
+      ${names.length ? '<div class="pm-sep"></div>' + names.map(item).join('') : ''}
+      <div class="pm-sep"></div>
+      <div class="pm-item" onclick="startSavePreset()">Save Current Settings as Preset…</div>
+      ${S.activePreset !== DEFAULT_PRESET
+        ? `<div class="pm-item" onclick="startRenamePreset()">Rename Preset…</div>
+           <div class="pm-item" onclick="deletePreset()">Delete Preset</div>`
+        : `<div class="pm-item dim">Rename Preset…</div>
+           <div class="pm-item dim">Delete Preset</div>`}
+    </div>` : '';
+
+  return `
+    <div class="preset-row">
+      <span class="preset-lab">Presets:</span>
+      <button class="preset-pop" onclick="event.stopPropagation();togglePresetMenu()">
+        <span>${esc(S.activePreset)}${dirty ? ' <span class="preset-mod">(Modified)</span>' : ''}</span>
+        <span class="preset-chev"><i></i><i></i></span>
+      </button>
+      ${menu}
+    </div>`;
+}
+
+function togglePresetMenu() {
+  S.presetMenu = !S.presetMenu;
+  renderDetail();
+  // Click anywhere else to dismiss, the way a real pop-up behaves. Bound
+  // on the next tick so the click that opened it doesn't close it again.
+  if (S.presetMenu) setTimeout(() => document.addEventListener('click', _closePresetMenu), 0);
+}
+function _closePresetMenu() {
+  document.removeEventListener('click', _closePresetMenu);
+  if (S.presetMenu) { S.presetMenu = false; renderDetail(); }
+}
+
+function applyPreset(name) {
+  S.presetMenu = false;
+  S.activePreset = name;
+  // Deep copy: editing keywords afterwards must not quietly rewrite the
+  // saved preset, which is the whole point of (Modified).
+  S.categories = JSON.parse(JSON.stringify(
+    name === DEFAULT_PRESET ? DEFAULT_CATS : (S.presets[name] || DEFAULT_CATS)));
+  S.selCat = 0;
+  renderDetail(); autoSave();
+}
+
+function startSavePreset()   { S.presetMenu = false; S.presetEdit = 'save';   renderDetail(); _focusPresetName(); }
+function startRenamePreset() { S.presetMenu = false; S.presetEdit = 'rename'; renderDetail(); _focusPresetName(); }
+function _focusPresetName() {
+  setTimeout(() => { const el = document.getElementById('preset-name'); el?.focus(); el?.select(); }, 0);
+}
+
+function presetNameKey(e) {
+  if (e.key === 'Escape') { S.presetEdit = null; renderDetail(); return; }
+  if (e.key !== 'Enter') return;
+  const name = e.target.value.trim();
+  const mode = S.presetEdit;
+  S.presetEdit = null;
+  if (!name || name === DEFAULT_PRESET) { renderDetail(); return; }
+
+  if (mode === 'rename' && S.activePreset !== DEFAULT_PRESET) {
+    delete S.presets[S.activePreset];
+  }
+  S.presets[name] = JSON.parse(JSON.stringify(S.categories));
+  S.activePreset = name;
+  renderDetail(); autoSave();
+}
+
+function deletePreset() {
+  S.presetMenu = false;
+  if (S.activePreset === DEFAULT_PRESET) { renderDetail(); return; }
+  delete S.presets[S.activePreset];
+  // The categories on screen are left exactly as they are - deleting the
+  // name you saved under should not also throw away what you were editing.
+  S.activePreset = DEFAULT_PRESET;
+  renderDetail(); autoSave();
+}
+
 // ── Categories ────────────────────────────────────────────────────────────────
 function categoriesHTML() {
   const cats = S.categories;
@@ -527,6 +684,7 @@ function categoriesHTML() {
   ).join('');
 
   return `
+    ${presetRowHTML()}
     <div class="cat-heads">
       <div class="h-cat"><div class="sec-label">Category</div></div>
       <div class="h-kw"><div class="sec-label">Keywords</div></div>
@@ -848,6 +1006,9 @@ function autoSave() {
       auto_convert:  S.auto_convert,
       launch_at_login: S.launch_at_login,
       categories:    S.categories,
+      // presetMenu / presetEdit are transient UI and deliberately absent.
+      presets:       S.presets,
+      active_preset: S.activePreset,
     }
   });
 }
@@ -866,6 +1027,35 @@ _HTML = (_HTML.replace("${VERSION}", VERSION)
 
 
 # ── Message handler ───────────────────────────────────────────────────────────
+
+def _clean_presets(raw) -> dict:
+    """
+    Coerces the presets map coming back from the page into plain Python.
+
+    Everything crossing the JS bridge arrives as Objective-C bridged types,
+    and this ends up in config.json, so it is normalised here rather than
+    trusted: names become str, keyword lists become lists of str, and
+    anything malformed is dropped instead of being written out.
+    """
+    out = {}
+    if not hasattr(raw, "items"):
+        return out
+    for name, cats in raw.items():
+        try:
+            clean = [
+                {
+                    "name":     str(c.get("name", "")),
+                    "enabled":  bool(c.get("enabled", True)),
+                    "keywords": [str(k) for k in c.get("keywords", [])],
+                }
+                for c in cats
+            ]
+        except Exception:  # noqa: BLE001 - a malformed preset is skipped, not fatal
+            continue
+        if clean:
+            out[str(name)] = clean
+    return out
+
 
 class _MessageHandler(NSObject):
     """Bridges JS postMessage calls into Python."""
@@ -941,6 +1131,12 @@ class SettingsWindow:
             "auto_convert":    config.get("auto_convert",    False),
             "launch_at_login": config.get("launch_at_login", False),
             "categories":      cats,
+            # Saved category sets, name -> [{name, enabled, keywords}].
+            # "Default Keywords" is never stored: it always means the
+            # converter's own table, so there is a way back that cannot be
+            # deleted or edited away.
+            "presets":         config.get("category_presets") or {},
+            "activePreset":    config.get("active_preset") or "Default Keywords",
         }
 
         # Message handler
@@ -1028,6 +1224,8 @@ class SettingsWindow:
                 "auto_convert":    bool(raw.get("auto_convert",    False)),
                 "launch_at_login": bool(raw.get("launch_at_login", False)),
                 "categories":      cats,
+                "category_presets": _clean_presets(raw.get("presets")),
+                "active_preset":    str(raw.get("active_preset") or "Default Keywords"),
             }
             # Live apply — the panel stays open; the close button dismisses it.
             self._on_save(config)

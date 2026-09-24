@@ -292,6 +292,8 @@ class Stem2AAFApp(rumps.App):
             "auto_convert":  self.cfg.get("auto_convert",                  False),
             "launch_at_login": self.cfg.get("launch_at_login",             False),
             "categories":    categories,
+            "category_presets": self.cfg.get("category_presets") or {},
+            "active_preset":    self.cfg.get("active_preset") or "Default Keywords",
         }
 
     def open_settings(self, _):
@@ -358,6 +360,13 @@ class Stem2AAFApp(rumps.App):
         self.cfg["category_order"]  = [{"name": c["name"], "enabled": c["enabled"]} for c in cats]
         self.cfg["custom_keywords"] = {c["name"]: c["keywords"] for c in cats}
         self.cfg.pop("disabled_keywords", None)  # remove legacy key if present
+
+        # Saved category sets. Stored whole rather than folded into
+        # category_order/custom_keywords, because a preset is a snapshot of
+        # both at once and splitting it would make them impossible to
+        # reassemble reliably.
+        self.cfg["category_presets"] = new_cfg.get("category_presets") or {}
+        self.cfg["active_preset"]    = new_cfg.get("active_preset") or "Default Keywords"
 
         config.save(self.cfg)
 
