@@ -346,20 +346,39 @@ function esc(s) {
 }
 let _dragKw = null; // {catIdx, kwIdx} — set during keyword drag
 
-// Drawn in SF Symbols' idiom: 16px box, 1.5 stroke, currentColor, no fill.
-const _sym = d => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"
-  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+// Drawn in SF Symbols' idiom: 16px grid, 1.5 stroke, currentColor, no
+// fill. The size is a parameter so the sidebar (16px) and the step tags
+// in How to Use (12px) draw from one set of paths rather than drifting.
+const _sym = (d, px = 16) => `<svg width="${px}" height="${px}" viewBox="0 0 16 16"
+  fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
   stroke-linejoin="round">${d}</svg>`;
 
 // gearshape — 8 even teeth, generated rather than hand-drawn so the
 // spacing is exact; a hand-written path reads as lumpy at 16px.
-const IconGeneral = _sym(`<path stroke-linejoin="round" d="M6.87 1.19 L9.13 1.19 L9.38 2.93 L10.61 3.44 L12.01 2.39 L13.61 3.99 L12.56 5.39 L13.07 6.62 L14.81 6.87 L14.81 9.13 L13.07 9.38 L12.56 10.61 L13.61 12.01 L12.01 13.61 L10.61 12.56 L9.38 13.07 L9.13 14.81 L6.87 14.81 L6.62 13.07 L5.39 12.56 L3.99 13.61 L2.39 12.01 L3.44 10.61 L2.93 9.38 L1.19 9.13 L1.19 6.87 L2.93 6.62 L3.44 5.39 L2.39 3.99 L3.99 2.39 L5.39 3.44 L6.62 2.93 Z"/><circle cx="8" cy="8" r="2.35"/>`);
+const P_GEAR = `<path stroke-linejoin="round" d="M6.87 1.19 L9.13 1.19 L9.38 2.93 L10.61 3.44 L12.01 2.39 L13.61 3.99 L12.56 5.39 L13.07 6.62 L14.81 6.87 L14.81 9.13 L13.07 9.38 L12.56 10.61 L13.61 12.01 L12.01 13.61 L10.61 12.56 L9.38 13.07 L9.13 14.81 L6.87 14.81 L6.62 13.07 L5.39 12.56 L3.99 13.61 L2.39 12.01 L3.44 10.61 L2.93 9.38 L1.19 9.13 L1.19 6.87 L2.93 6.62 L3.44 5.39 L2.39 3.99 L3.99 2.39 L5.39 3.44 L6.62 2.93 Z"/><circle cx="8" cy="8" r="2.35"/>`;
 // slider.horizontal.3
-const IconCategories = _sym(`<path d="M2 4.3h12M2 8h12M2 11.7h12"/><circle cx="5.6" cy="4.3" r="1.5" fill="currentColor" stroke="none"/><circle cx="10.4" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.4" cy="11.7" r="1.5" fill="currentColor" stroke="none"/>`);
+const P_SLIDERS = `<path d="M2 4.3h12M2 8h12M2 11.7h12"/><circle cx="5.6" cy="4.3" r="1.5" fill="currentColor" stroke="none"/><circle cx="10.4" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.4" cy="11.7" r="1.5" fill="currentColor" stroke="none"/>`;
 // questionmark.circle
-const IconHelp = _sym(`<circle cx="8" cy="8" r="6.3"/><path d="M6.35 6.25a1.7 1.7 0 1 1 1.95 1.8v1.1"/><circle cx="8.3" cy="11.3" r=".55" fill="currentColor" stroke="none"/>`);
+const P_QUESTION = `<circle cx="8" cy="8" r="6.3"/><path d="M6.35 6.25a1.7 1.7 0 1 1 1.95 1.8v1.1"/><circle cx="8.3" cy="11.3" r=".55" fill="currentColor" stroke="none"/>`;
 // info.circle
-const IconAbout = _sym(`<circle cx="8" cy="8" r="6.3"/><path d="M8 7.3v3.6"/><circle cx="8" cy="5.1" r=".55" fill="currentColor" stroke="none"/>`);
+const P_INFO = `<circle cx="8" cy="8" r="6.3"/><path d="M8 7.3v3.6"/><circle cx="8" cy="5.1" r=".55" fill="currentColor" stroke="none"/>`;
+// square.and.arrow.up — the DAW export step
+const P_EXPORT = `<path d="M8 1.7v7.1"/><path d="M5.5 4.2 8 1.7l2.5 2.5"/><path d="M3.1 9.3v3.4a1.3 1.3 0 0 0 1.3 1.3h7.2a1.3 1.3 0 0 0 1.3-1.3V9.3"/>`;
+// menubar.rectangle — the menu bar step
+const P_MENUBAR = `<rect x="1.5" y="3.2" width="13" height="9.6" rx="1.7"/><path d="M1.5 6.2h13"/><circle cx="12.2" cy="4.7" r=".5" fill="currentColor" stroke="none"/><circle cx="10.4" cy="4.7" r=".5" fill="currentColor" stroke="none"/>`;
+// folder — where the AAF lands
+const P_FOLDER = `<path d="M1.7 4.4a1.3 1.3 0 0 1 1.3-1.3h2.4l1.5 1.8h5.4a1.3 1.3 0 0 1 1.3 1.3v5.6a1.3 1.3 0 0 1-1.3 1.3H3a1.3 1.3 0 0 1-1.3-1.3z"/>`;
+
+const IconGeneral    = _sym(P_GEAR);
+const IconCategories = _sym(P_SLIDERS);
+const IconHelp       = _sym(P_QUESTION);
+const IconAbout      = _sym(P_INFO);
+
+// 12px versions for the inline tags under each How to Use step.
+const TagGear    = _sym(P_GEAR, 12);
+const TagExport  = _sym(P_EXPORT, 12);
+const TagMenubar = _sym(P_MENUBAR, 12);
+const TagFolder  = _sym(P_FOLDER, 12);
 
 const SECTIONS = [
   {id:'general',    icon:IconGeneral,    label:'General'},
@@ -711,43 +730,43 @@ function helpHTML() {
       <div class="help-step">
         <div class="step-num">1</div>
         <div class="step-body">
-          <div class="step-title">Point the Watch Folder at your project</div>
-          <div class="step-desc">Its <strong>name becomes the project name</strong>, so use one folder per project.</div>
-          <div class="step-tag">⚙️ General → Watch Folder</div>
+          <div class="step-title">Choose your folders</div>
+          <div class="step-desc">The <strong>Watch Folder</strong> is where your DAW exports stems. Set it once and leave it. The <strong>Output Folder</strong> is the project &mdash; its name becomes the project name, so point it at a new folder for each song.</div>
+          <div class="step-tag">${TagGear} General &rarr; Watch Folder, Output Folder</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">2</div>
         <div class="step-body">
-          <div class="step-title">Convert every stem in one pass</div>
-          <div class="step-desc">Export all the tracks together in a <strong>single</strong> operation. Separate exports may not line up, so a batch with mismatched sample rates is refused.</div>
-          <div class="step-tag">🎛 Your DAW → Export Audio to Watch Folder</div>
+          <div class="step-title">Export every track in one pass</div>
+          <div class="step-desc">Export all tracks together in a <strong>single</strong> operation. Track names decide the categories, so name them the way you want them sorted &mdash; a track called <em>Kick</em> lands in Drums.</div>
+          <div class="step-tag">${TagExport} Your DAW &rarr; Export Audio to Watch Folder</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">3</div>
         <div class="step-body">
-          <div class="step-title">Wait for the count, then convert</div>
-          <div class="step-desc">The drop down menu item counts what's waiting, <em>Convert to AAF</em>. When it matches what you exported, click it. <em>Auto-convert</em> in General fires once the count holds steady for __QUIET_SECONDS__ seconds.</div>
-          <div class="step-tag">🎚 Menu bar → Convert to AAF</div>
+          <div class="step-title">Convert</div>
+          <div class="step-desc">The menu bar counts what&rsquo;s waiting. When it matches what you exported, click <em>Convert to AAF</em>. Or turn on <em>Auto-convert</em> in General and it fires once the count holds steady for __QUIET_SECONDS__ seconds.</div>
+          <div class="step-tag">${TagMenubar} Menu bar &rarr; Convert to AAF</div>
         </div>
       </div>
       <div class="help-step">
         <div class="step-num">4</div>
         <div class="step-body">
-          <div class="step-title">Import the AAF to your preferred software</div>
-          <div class="step-desc">Each conversion gets a numbered folder holding the <em>.AAF</em>, a log, and your stems unless you've set them to be deleted. Named after parent folder.</div>
-          <div class="step-tag">📂 Output Folder → &lt;project&gt; Converted v1</div>
+          <div class="step-title">Import the AAF</div>
+          <div class="step-desc">Each conversion gets its own numbered folder holding the <em>.AAF</em>, a log, and your stems unless you&rsquo;ve turned off <em>Keep stems</em>.</div>
+          <div class="step-tag">${TagFolder} Output Folder &rarr; &lt;project&gt; Converted v1</div>
         </div>
       </div>
     </div>
     <div class="help-tip key">
-      <div class="help-tip-title">Nothing is ever converted halfway</div>
-      <div class="help-tip-body">If any file is still being written, <strong>nothing</strong> is converted: you get an error naming it, and no AAF. Wait for the export to finish, then convert again.</div>
+      <div class="help-tip-title">Nothing is converted halfway</div>
+      <div class="help-tip-body">If any file is still being written, <strong>nothing</strong> is converted: you get an error naming the file, and no AAF. Wait for the export to finish, then convert again.</div>
     </div>
     <div class="help-tip">
-      <div class="help-tip-title">Tip — Categories tidy the track list</div>
-      <div class="help-tip-body">Grouping orders tracks by category… and names them <em>Drums_Kick (01)</em>. It sorts and labels the tracks; it does not create busses.</div>
+      <div class="help-tip-title">Categories sort, they don&rsquo;t bus</div>
+      <div class="help-tip-body">With <em>Group stems by category</em> on, tracks arrive ordered and named <em>Drums_Kick (01)</em>. It sorts and labels them; it does not create busses.</div>
     </div>`;
 }
 

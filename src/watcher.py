@@ -24,10 +24,10 @@ STEMS_POLL_INTERVAL_SECONDS = 1.0
 _WAV_EXTENSIONS = (".wav", ".wave")
 
 
-def _next_conversion_dir(watch_folder: str, output_folder: str) -> tuple[str, int, str]:
+def _next_conversion_dir(output_folder: str) -> tuple[str, int, str]:
     """
     Creates a fresh per-conversion folder inside output_folder, named
-    "<project> Converted v<N>" after the watched folder itself (e.g. a
+    "<project> Converted v<N>" after the OUTPUT folder (e.g. an output
     folder named "The Sun" produces "The Sun Converted v1"), and returns
     it alongside the version number N and the sanitized project name - so
     the AAF written inside it (as "<project>_v<N>.aaf") shares the exact
@@ -36,8 +36,22 @@ def _next_conversion_dir(watch_folder: str, output_folder: str) -> tuple[str, in
     a conversion happens for this project, based on existing "<project>
     Converted v*" folders, so repeated exports don't collide or overwrite
     each other.
+
+    The name used to come from the WATCH folder, which had the two
+    settings the wrong way round. A watch folder you re-point at every new
+    project is not a watch folder - the entire value of watching is that
+    it stays put while the DAW keeps exporting to the same place. So the
+    fixed setting was the one supplying the project identity, and every
+    conversion from a stable inbox came out named after the inbox.
+
+    Taking the name from the output folder puts identity on the setting
+    that is genuinely per-project. It is also backwards compatible: app.py
+    resolves an unset output_folder to the watch folder, so anyone still
+    using a single folder gets exactly the name they got before, and the
+    new behaviour only appears once a separate output folder is chosen -
+    which is the moment you would want it.
     """
-    project_name = _sanitize_name(os.path.basename(os.path.normpath(watch_folder)), fallback="Project")
+    project_name = _sanitize_name(os.path.basename(os.path.normpath(output_folder)), fallback="Project")
     pattern = re.compile(re.escape(project_name) + r" Converted v(\d+)$")
 
     highest = 0
@@ -274,7 +288,7 @@ class StemsBatchHandler(FileSystemEventHandler):
                 settled_mtimes[path] = None
 
         os.makedirs(self.output_folder, exist_ok=True)
-        conversion_dir, version, project_name = _next_conversion_dir(self.watch_folder, self.output_folder)
+        conversion_dir, version, project_name = _next_conversion_dir(self.output_folder)
         out_path = os.path.join(conversion_dir, f"{project_name}_v{version}.aaf")
         label = f"{len(settled)} stem file(s)"
 
