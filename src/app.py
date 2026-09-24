@@ -108,11 +108,48 @@ def _ensure_single_instance():
 
 
 class Stem2AAFApp(rumps.App):
-    # How many alternations between white and orange the icon does once a
-    # conversion finishes (all 5 bars are white by then) before settling
-    # back to solid orange - 6 steps at the timer's tick rate is 3 full
-    # white/orange cycles.
-    _FLASH_STEPS = 6
+    # Once the fill completes, all five bars blink white against orange
+    # this many times, then settle back to the solid orange logo:
+    #
+    #     all white -> back to orange -> all white -> back to orange
+    #
+    # The flash starts on WHITE deliberately. Progress ends at 100%, which
+    # is already the solid orange icon, so opening the flash on orange
+    # would repaint what is already on screen and waste the first step -
+    # the count would look short by one. Starting on white makes every
+    # step a visible change. Each blink is a white step followed by an
+    # orange one, and the final orange step lands on the resting icon, so
+    # there is no extra frame between the flash and rest.
+    _FLASH_BLINKS = 2
+    _FLASH_STEPS = _FLASH_BLINKS * 2
+
+    # How long each bar is shown before the next one lights.
+    #
+    # The bars are an ELAPSED-TIME meter, not a progress bar. Reported
+    # progress turned out to be useless as a direct index: a handful of
+    # stems converts almost instantly, so it went 0 -> 1 between two ticks
+    # and the fill jumped straight from 0 bars to 5, invisible. Driving it
+    # off progress with a speed limit instead just moved the problem - the
+    # icon then kept animating for a second after the AAF had already
+    # landed, which is worse than uninformative, it is wrong.
+    #
+    # So the bars simply say how long this has been running, and the
+    # completion flash says it is done. That makes every case read
+    # correctly with no special handling:
+    #
+    #   fast   bar 1 blinks, then the flash cuts in - done in under 2 s
+    #   normal bar after bar lights as it goes
+    #   slow   reaches bar 5 at 6 s and blinks there until it finishes
+    #
+    # Bar 5 is terminal on purpose: it never claims to know how much is
+    # left, only that work is still happening. And because completion
+    # interrupts at whatever bar it has reached, the icon is never behind
+    # the actual result.
+    _BAR_SECONDS = 1.5
+    _TICK_SECONDS = 0.15
+    _TICKS_PER_BAR = int(_BAR_SECONDS / _TICK_SECONDS)  # 10
+    # Solid bars cap here so the fifth is always the one blinking.
+    _MAX_SOLID_BARS = 4
 
     def __init__(self):
         icon_path = _find_asset_path("icon.png")
@@ -153,37 +190,46 @@ class Stem2AAFApp(rumps.App):
         self._poll_timer = rumps.Timer(self._poll_folder, POLL_SECONDS)
         self._poll_timer.start()
 
-        # Drives the in-progress icon animation: from the instant of the
-        # click, whichever bar is "next" blinks white/orange continuously
-        # until real progress (see converter.py's on_progress and
-        # watcher.py's _convert_batch - never a fixed timer guessing at
-        # duration) actually earns it, at which point that bar goes solid
-        # and the blink moves on to the next one - so there's continuous
-        # visible motion the whole way through, never a dead gap where it
-        # looks stopped. Once all 5 are solid, it flashes white/orange a
-        # few times on completion, then rests back on the plain orange
-        # icon. Runs continuously rather than being started/stopped per
-        # conversion, since starting a fresh rumps.Timer from the
-        # watcher's background thread (rather than this app's own main
-        # thread) isn't a safe operation - this way the only things ever
-        # touched from that other thread are plain numbers/strings, and
-        # the timer itself (always running, always on the main thread)
-        # just reads them on every tick.
+        # Drives the icon animation. The whole sequence reads as one idea:
+        # the moment stems appear the logo goes WHITE, and orange is the
+        # progress that fills it back in, bar by bar, left to right.
+        #
+        #   stems detected   white logo, leftmost bar blinking orange
+        #   converting       orange fills left to right as real progress
+        #                    arrives; the next unearned bar keeps blinking
+        #                    so there is always visible motion
+        #   done             all five orange, flashing against all-white
+        #   at rest          the plain orange logo
+        #
+        # Progress is real, not a timer guessing at duration - see
+        # converter.py's on_progress and watcher.py's _convert_batch.
+        #
+        # _prog_icons is indexed by "how many bars are orange", so index 0
+        # is the all-white logo and index 5 is the ordinary orange one.
+        # Those two ends are the existing assets; 1-4 are generated from
+        # them, so all six share one geometry.
         self._resting_icon = icon_path
-        self._fill_icons = [
-            icon_path,  # 0 bars filled - the plain resting icon
-            _find_asset_path("icon_fill_1.png"),
-            _find_asset_path("icon_fill_2.png"),
-            _find_asset_path("icon_fill_3.png"),
-            _find_asset_path("icon_fill_4.png"),
-            _find_asset_path("icon_flash_white.png"),  # 5 bars filled - all white
+        self._prog_icons = [
+            _find_asset_path("icon_flash_white.png"),  # 0 orange - all white
+            _find_asset_path("icon_prog_1.png"),
+            _find_asset_path("icon_prog_2.png"),
+            _find_asset_path("icon_prog_3.png"),
+            _find_asset_path("icon_prog_4.png"),
+            icon_path,                                 # 5 orange - the logo
         ]
-        self._icon_state = "idle"  # "idle" | "filling" | "flashing"
+        # "idle"    - nothing waiting, plain logo, timer stopped
+        # "waiting" - stems detected but not converting yet
+        # "filling" - conversion running, orange climbing with progress
+        # "flashing"- conversion finished, the all-bars orange/white flash
+        self._icon_state = "idle"
         self._progress = 0.0
-        self._blink_index = 0  # drives the continuous next-bar blink while "filling"
-        self._flash_index = 0  # drives the fixed-length completion flash while "flashing"
-        # Started by _begin_conversion and stopped by _animate_icon once
-        # the icon is back at rest, rather than running all day.
+        self._blink_index = 0  # drives the next-bar blink while waiting/filling
+        self._flash_index = 0  # drives the fixed-length completion flash
+        self._shown_bars = 0   # displayed bar count, chases real progress
+        self._bar_ticks = 0    # ticks the current bar has been held
+        # Started when there is something to show and stopped by
+        # _animate_icon once the icon is back at rest, rather than waking
+        # the app ~7x a second all day on a menu-bar app that mostly idles.
         self._icon_timer = rumps.Timer(self._animate_icon, 0.15)
 
     # -- Folders ------------------------------------------------------------
@@ -383,6 +429,22 @@ class Stem2AAFApp(rumps.App):
         else:
             self.convert_now_item.title = "Convert to AAF"
 
+        # Stems appearing is itself worth showing: the logo goes white with
+        # the first bar blinking orange, before any conversion starts. Only
+        # "idle" is promoted, so a running conversion or its completion
+        # flash is never interrupted by the poll.
+        if count > 0 and self._icon_state == "idle":
+            self._progress = 0.0
+            self._blink_index = 0
+            self._shown_bars = 0
+            self._bar_ticks = 0
+            self._icon_state = "waiting"
+            self._start_icon_timer()
+        elif count == 0 and self._icon_state == "waiting":
+            # They were converted or removed without us doing it.
+            self._icon_state = "idle"
+            self.icon = self._resting_icon
+
         if not self.cfg.get("auto_convert", False) or count == 0:
             self._auto_count_last = count
             self._auto_quiet_ticks = 0
@@ -417,15 +479,25 @@ class Stem2AAFApp(rumps.App):
         battery cost. It now stops itself once the icon is back at rest
         and _begin_conversion restarts it.
         """
-        if self._icon_state == "filling":
-            bars_earned = min(5, max(0, int(self._progress * 5)))
-            if bars_earned >= 5:
-                self.icon = self._fill_icons[5]
-            else:
-                self.icon = (
-                    self._fill_icons[bars_earned + 1] if self._blink_index % 2 == 0
-                    else self._fill_icons[bars_earned]
-                )
+        if self._icon_state in ("waiting", "filling"):
+            # One clock for the whole operation: it starts the moment
+            # stems are detected and keeps running through the quiet wait
+            # and the conversion, because from the outside that is all one
+            # wait - stems land, and eventually an AAF appears.
+            if self._shown_bars < self._MAX_SOLID_BARS:
+                self._bar_ticks += 1
+                if self._bar_ticks >= self._TICKS_PER_BAR:
+                    self._shown_bars += 1
+                    self._bar_ticks = 0
+                    self._blink_index = 0  # restart the blink on the new bar
+
+            # The bar after the solid ones blinks. At the cap that is the
+            # fifth, which then blinks for as long as the work takes.
+            bars = self._shown_bars
+            self.icon = (
+                self._prog_icons[bars + 1] if self._blink_index % 2 == 0
+                else self._prog_icons[bars]
+            )
             self._blink_index += 1
         elif self._icon_state == "flashing":
             if self._flash_index >= self._FLASH_STEPS:
@@ -433,7 +505,12 @@ class Stem2AAFApp(rumps.App):
                 self.icon = self._resting_icon
                 self._stop_icon_timer()
                 return
-            self.icon = self._fill_icons[5] if self._flash_index % 2 == 0 else self._resting_icon
+            # All five bars, alternating full white against full orange,
+            # white first - see _FLASH_BLINKS for why the order matters.
+            self.icon = (
+                self._prog_icons[0] if self._flash_index % 2 == 0
+                else self._prog_icons[5]
+            )
             self._flash_index += 1
         else:
             # Idle: the icon is already at rest, so there is nothing to
@@ -450,14 +527,29 @@ class Stem2AAFApp(rumps.App):
     def _begin_conversion(self):
         """Resets the progress animation and asks the watcher to convert."""
         self._progress = 0.0
-        self._blink_index = 0
+        # Deliberately not resetting _blink_index, _shown_bars or
+        # _bar_ticks: coming out of "waiting" the first bar is already
+        # blinking, and restarting those counters would stutter it at the
+        # exact moment the conversion begins. Convert-now from a cold
+        # start has them at 0 already.
         self._icon_state = "filling"
+        self._start_icon_timer()
+        self.watcher.convert_pending_stems_now()
+
+    def _start_icon_timer(self):
+        """
+        Starts the animation timer if it isn't already running.
+
+        Only ever called from the main thread (a menu click or a rumps
+        timer). The watcher's background thread must not start a timer,
+        so on_conversion_result only sets plain values and relies on the
+        timer already running.
+        """
         try:
             if not self._icon_timer.is_alive():
                 self._icon_timer.start()
         except Exception:  # noqa: BLE001
             pass
-        self.watcher.convert_pending_stems_now()
 
     # -- Conversion ---------------------------------------------------------
 
@@ -493,6 +585,11 @@ class Stem2AAFApp(rumps.App):
         # plain values. The icon timer is already running whenever a
         # conversion is in flight (see _begin_conversion), and it stops
         # itself on the main thread once the completion flash is done.
+        #
+        # Straight to the flash from whatever bar the meter had reached.
+        # It deliberately does NOT run the bars out to five first: the AAF
+        # exists now, and finishing the sweep would leave the icon saying
+        # "working" for a second after the file had already appeared.
         self._flash_index = 0
         self._icon_state = "flashing"
         if not skip_log:

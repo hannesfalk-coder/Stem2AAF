@@ -41,11 +41,15 @@ APP = ["src/app.py"]
 DATA_FILES = [(
     "",
     [
+        # Menu-bar icon and its progress animation. icon.png (all five
+        # bars orange) and icon_flash_white.png (all white) are the two
+        # ends of the sequence; icon_prog_1..4 are the steps between,
+        # a white logo with the N leftmost bars filled orange.
         "src/assets/icon.png",
-        "src/assets/icon_fill_1.png",
-        "src/assets/icon_fill_2.png",
-        "src/assets/icon_fill_3.png",
-        "src/assets/icon_fill_4.png",
+        "src/assets/icon_prog_1.png",
+        "src/assets/icon_prog_2.png",
+        "src/assets/icon_prog_3.png",
+        "src/assets/icon_prog_4.png",
         "src/assets/icon_flash_white.png",
         # Run by "Uninstall Stem2AAF..." in the menu. This replaced a
         # second full .app, built by its own py2app run, that existed only
