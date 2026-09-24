@@ -13,7 +13,8 @@ Usage:
     watch_folder   : str   — path to the watched stem folder
     output_folder  : str   — path for AAF output
     group_by_cat   : bool  — group stems by category
-    delete_stems   : bool  — delete stems after conversion
+    delete_stems   : bool  — delete stems after conversion (the panel shows
+                             this inverted, as "Keep stems after conversion")
     auto_convert   : bool  — convert automatically when stems arrive
     categories     : list  — [{name, enabled, keywords:[str]}, ...]
 
@@ -36,22 +37,37 @@ from AppKit import (
 from Foundation import NSObject
 from WebKit import WKUserContentController, WKWebView, WKWebViewConfiguration
 
-_TITLED        = 1    # NSWindowStyleMaskTitled
-_CLOSABLE      = 2    # NSWindowStyleMaskClosable
-_RESIZABLE     = 8    # NSWindowStyleMaskResizable
-_NONACTIVATING = 128  # NSWindowStyleMaskNonactivatingPanel
+_TITLED    = 1   # NSWindowStyleMaskTitled
+_CLOSABLE  = 2   # NSWindowStyleMaskClosable
+_RESIZABLE = 8   # NSWindowStyleMaskResizable
+
+# NSWindowStyleMaskNonactivatingPanel (128) is deliberately NOT used. It was
+# tried to make the close button respond to a single click, but it stops the
+# panel from activating the app, and WKWebView needs a key/active window to
+# route mouse events reliably — clicks on small targets (the enable dot) and
+# press-drag-release gestures (category reordering) were being dropped.
+# canBecomeKeyWindow below is what actually fixes the close button, and
+# _WebView.acceptsFirstMouse_ handles the first click into the content.
 
 
 class _SettingsPanel(NSPanel):
-    """NSPanel that accepts first-click on controls (incl. close button) without
-    requiring the app to activate first, while still becoming key for WKWebView
-    keyboard input."""
+    """NSPanel that can take key focus. An accessory (menu-bar) app has no
+    main window, so without this the panel never becomes key and its title-bar
+    controls need a throwaway activating click first."""
 
     def canBecomeKeyWindow(self):
         return True
 
     def canBecomeMainWindow(self):
         return False
+
+
+class _WebView(WKWebView):
+    """Delivers the first click into the page instead of spending it on
+    activating the window."""
+
+    def acceptsFirstMouse_(self, event):
+        return True
 
 # Web-content size of the panel. This is passed as the window's content
 # rect, so it is the area the page gets; the title bar sits above it.
@@ -95,6 +111,10 @@ _HTML = r"""<!DOCTYPE html>
 :root{
   --bg:#FFFFFF;--bg-2:#F2F2F7;--bg-3:#E5E5EA;--bg-el:#FFFFFF;
   --sidebar:#EBEBF0;--t1:#000000;--t2:#6C6C70;--t3:#AEAEB2;
+  /* Disabled-category outline and label. Separate from --t3 because --t3 is a
+     placeholder grey that goes very dark in dark mode, where an off checkbox
+     still has to be clearly visible as an empty box rather than fade out. */
+  --off:#AEAEB2;
   --green:#34C759;--red:#FF3B30;
   --sep:rgba(0,0,0,.09);--sep-s:rgba(0,0,0,.16);
   --chip-bg:rgba(0,0,0,.055);--chip-b:rgba(0,0,0,.11);
@@ -105,6 +125,7 @@ _HTML = r"""<!DOCTYPE html>
 @media(prefers-color-scheme:dark){:root{
   --bg:#1C1C1E;--bg-2:#2C2C2E;--bg-3:#3A3A3C;--bg-el:#2C2C2E;
   --sidebar:#252527;--t1:#FFFFFF;--t2:#8E8E93;--t3:#48484A;
+  --off:#7C7C82;
   --sep:rgba(255,255,255,.09);--sep-s:rgba(255,255,255,.16);
   --chip-bg:rgba(255,255,255,.08);--chip-b:rgba(255,255,255,.13);
   --tog-off:#3A3A3C;
@@ -125,9 +146,16 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
   margin:0 4px;border-radius:7px;transition:background .08s;border:1px solid transparent}
 .sb-row:hover{background:var(--chip-bg)}
 .sb-row.active{background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.18)}
-.sb-icon{width:22px;height:22px;border-radius:5px;display:flex;align-items:center;
-  justify-content:center;flex-shrink:0;font-size:13px;background:var(--bg-2)}
-.sb-row.active .sb-icon{background:rgba(0,0,0,.06)}
+/* SF Symbols-style glyphs rather than emoji. Emoji arrive at different
+   weights, colours and optical sizes, so the column reads as ragged and
+   the set can never be completed consistently - there was no emoji for
+   "How to Use", which is why that one was a hand-built span. These are
+   one stroke weight, one size, and take their colour from the row. The
+   22px box is kept so the layout is unchanged; only its fill is gone. */
+.sb-icon{width:22px;height:22px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;background:none;color:var(--t2)}
+.sb-icon svg{display:block}
+.sb-row.active .sb-icon{color:var(--t1)}
 .sb-name{font-size:13px;font-weight:500;color:var(--t1)}
 .change-btn.danger{color:var(--red)}
 .sb-row.active .sb-name{color:var(--t1)}
@@ -171,6 +199,14 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
    scrollbar on a pane whose columns already scroll internally. */
 .cat-split{display:flex;gap:0;flex:1;min-height:340px}
 .detail.split-mode{display:flex;flex-direction:column}
+/* Column headers. One "Category Keywords" label named the pair but sat
+   over only the left column, so "Keywords" pointed at nothing. Split in
+   two, each word sits over the column it names. The widths mirror
+   .cat-list-pane and .cat-detail-pane's margin so they stay aligned. */
+.cat-heads{display:flex;flex-shrink:0}
+.cat-heads .h-cat{width:176px;flex-shrink:0}
+.cat-heads .h-kw{flex:1;margin-left:10px}
+.cat-heads .sec-label{margin:0 0 8px}
 .cat-list-pane{width:176px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
   border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
 .cat-list-inner{flex:1;overflow-y:auto}
@@ -185,12 +221,32 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
    discoverable, always-works alternative. */
 .cl-row{cursor:grab}
 .cl-row.dragging{opacity:.5;cursor:grabbing;background:rgba(0,122,255,.10)}
-.cl-dot{width:9px;height:9px;border-radius:50%;background:#FF9500;flex-shrink:0;cursor:pointer;transition:opacity .1s}.cl-dot:hover{opacity:.7}
-.cl-dot.off{background:var(--t3)}
-.cl-row.active .cl-dot{background:#FF9500}
-.cl-row.active .cl-dot.off{background:var(--t3)}
+/* 9px is what you see, but a 9px click target is far too small to hit. The
+   transparent border grows the hit area to 23px while background-clip keeps
+   the paint at 9px, and the negative margin cancels the layout effect — so
+   it looks identical and is ~6x easier to click. */
+/* Calendar.app's sidebar pattern: the checkbox IS the colour swatch. Filled
+   orange with a tick while the category is matching, hollow outline when it
+   isn't — so the state differs by SHAPE as well as hue and stays readable in
+   greyscale or with colour-vision deficiency, which a bare dot did not. */
+.cl-check{position:relative;width:15px;height:15px;border-radius:4px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:#FF9500;border:1.5px solid transparent;
+  transition:background .12s,border-color .12s}
+/* Transparent overlay widens the click target without moving anything.
+   Generous vertically (nothing else shares the row's height), but tight
+   horizontally — every pixel it takes sideways is a pixel of the row that
+   toggles instead of selecting, which is the wrong gesture. */
+.cl-check::before{content:'';position:absolute;inset:-6px -3px}
+.cl-check:hover{opacity:.75}
+.cl-check svg{display:block}
+.cl-check.off{background:transparent;border-color:var(--off)}
+.cl-check.off svg{display:none}
 .cl-name{flex:1;font-size:13px;font-weight:500;color:var(--t1)}
 .cl-row.active .cl-name{color:var(--t1)}
+/* State reads from the whole row, not just the 15px box — matters when
+   scanning nine categories for the one or two that are switched off. */
+.cl-row.off .cl-name,.cl-row.active.off .cl-name{color:var(--off)}
 .cl-footer{padding:7px 10px;border-top:1px solid var(--sep);display:flex;gap:4px}
 .cl-ft-btn[disabled]{opacity:.35;cursor:default}
 .cl-ft-btn{width:26px;height:20px;background:var(--bg-2);border:1px solid var(--sep-s);
@@ -278,6 +334,7 @@ S.addingCat = false;
 S.dragCat   = -1;   // index of the category row currently being dragged
 
 const XSvg = `<svg viewBox="0 0 8 8" width="8" height="8" fill="none"><path d="M1 1l6 6M7 1L1 7" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
+const CheckSvg = `<svg viewBox="0 0 10 10" width="9" height="9" fill="none"><path d="M1.5 5.2l2.2 2.2L8.5 2.6" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
 // All user-entered text (category names, keywords) goes through esc() before
 // reaching innerHTML — a keyword like "R&D" or "<8" would otherwise corrupt
@@ -289,11 +346,26 @@ function esc(s) {
 }
 let _dragKw = null; // {catIdx, kwIdx} — set during keyword drag
 
+// Drawn in SF Symbols' idiom: 16px box, 1.5 stroke, currentColor, no fill.
+const _sym = d => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none"
+  stroke="currentColor" stroke-width="1.5" stroke-linecap="round"
+  stroke-linejoin="round">${d}</svg>`;
+
+// gearshape — 8 even teeth, generated rather than hand-drawn so the
+// spacing is exact; a hand-written path reads as lumpy at 16px.
+const IconGeneral = _sym(`<path stroke-linejoin="round" d="M6.87 1.19 L9.13 1.19 L9.38 2.93 L10.61 3.44 L12.01 2.39 L13.61 3.99 L12.56 5.39 L13.07 6.62 L14.81 6.87 L14.81 9.13 L13.07 9.38 L12.56 10.61 L13.61 12.01 L12.01 13.61 L10.61 12.56 L9.38 13.07 L9.13 14.81 L6.87 14.81 L6.62 13.07 L5.39 12.56 L3.99 13.61 L2.39 12.01 L3.44 10.61 L2.93 9.38 L1.19 9.13 L1.19 6.87 L2.93 6.62 L3.44 5.39 L2.39 3.99 L3.99 2.39 L5.39 3.44 L6.62 2.93 Z"/><circle cx="8" cy="8" r="2.35"/>`);
+// slider.horizontal.3
+const IconCategories = _sym(`<path d="M2 4.3h12M2 8h12M2 11.7h12"/><circle cx="5.6" cy="4.3" r="1.5" fill="currentColor" stroke="none"/><circle cx="10.4" cy="8" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.4" cy="11.7" r="1.5" fill="currentColor" stroke="none"/>`);
+// questionmark.circle
+const IconHelp = _sym(`<circle cx="8" cy="8" r="6.3"/><path d="M6.35 6.25a1.7 1.7 0 1 1 1.95 1.8v1.1"/><circle cx="8.3" cy="11.3" r=".55" fill="currentColor" stroke="none"/>`);
+// info.circle
+const IconAbout = _sym(`<circle cx="8" cy="8" r="6.3"/><path d="M8 7.3v3.6"/><circle cx="8" cy="5.1" r=".55" fill="currentColor" stroke="none"/>`);
+
 const SECTIONS = [
-  {id:'general',    icon:'⚙️',  label:'General'},
-  {id:'categories', icon:'🎛️',  label:'Categories'},
-  {id:'help',       icon:'<span style="color:var(--t2);font-size:15px;font-weight:600;line-height:1">?</span>', label:'How to Use'},
-  {id:'about',      icon:'ℹ️',  label:'About'},
+  {id:'general',    icon:IconGeneral,    label:'General'},
+  {id:'categories', icon:IconCategories, label:'Categories'},
+  {id:'help',       icon:IconHelp,       label:'How to Use'},
+  {id:'about',      icon:IconAbout,      label:'About'},
 ];
 
 // ── Native bridge ─────────────────────────────────────────────────────────────
@@ -368,10 +440,10 @@ function generalHTML() {
       </div>
       <div class="sr sr-toggle">
         <div class="sr-text" style="flex:1">
-          <div class="sr-title">Delete stems after conversion</div>
-          <div class="sr-desc">Remove source audio files once the AAF is built. The AAF embeds all audio — stems aren't needed.</div>
+          <div class="sr-title">Keep stems after conversion</div>
+          <div class="sr-desc">Keep renamed stems next to converted AAF.</div>
         </div>
-        <button class="tog${S.delete_stems?' on':''}" onclick="S.delete_stems=!S.delete_stems;this.classList.toggle('on',S.delete_stems);autoSave()"></button>
+        <button class="tog${S.keep_stems?' on':''}" onclick="S.keep_stems=!S.keep_stems;this.classList.toggle('on',S.keep_stems);autoSave()"></button>
       </div>
       <div class="sr sr-toggle">
         <div class="sr-text" style="flex:1">
@@ -412,8 +484,8 @@ function categoriesHTML() {
   const cat  = cats[sel] || cats[0];
 
   const listRows = cats.map((c, i) => `
-    <div class="cl-row${i===sel?' active':''}${i===S.dragCat?' dragging':''}" data-idx="${i}" onmousedown="catDragStart(event,${i})" onclick="selCat(${i})">
-      <span class="cl-dot${c.enabled?'':' off'}" onclick="event.stopPropagation();toggleCat(${i})" title="${c.enabled?'Click to disable':'Click to enable'}"></span>
+    <div class="cl-row${i===sel?' active':''}${c.enabled?'':' off'}${i===S.dragCat?' dragging':''}" data-idx="${i}" onmousedown="catDragStart(event,${i})" onclick="selCat(${i})">
+      <span class="cl-check${c.enabled?'':' off'}" onclick="event.stopPropagation();toggleCat(${i})" title="${c.enabled?'Stop matching this category':'Match this category again'}">${CheckSvg}</span>
       <span class="cl-name">${esc(c.name)}</span>
     </div>`).join('');
 
@@ -426,7 +498,10 @@ function categoriesHTML() {
   ).join('');
 
   return `
-    <div class="sec-label">Category Keywords</div>
+    <div class="cat-heads">
+      <div class="h-cat"><div class="sec-label">Category</div></div>
+      <div class="h-kw"><div class="sec-label">Keywords</div></div>
+    </div>
     <div class="cat-split">
       <div class="cat-list-pane">
         <div class="cat-list-inner">
@@ -465,7 +540,12 @@ function toggleCat(i) {
   // Ignore the click that lands when a drag is released over a row, so
   // reordering never flips a category's enabled state by accident.
   if (_wasJustDragging()) return;
-  S.categories[i].enabled = !S.categories[i].enabled; S.selCat = i; renderDetail(); autoSave();
+  // Deliberately does NOT touch S.selCat. The two gestures are separate:
+  // clicking the row changes which category you are editing, clicking the
+  // checkbox turns that category on or off. Selecting here as well meant
+  // you could not toggle one category while reading another's keywords.
+  S.categories[i].enabled = !S.categories[i].enabled;
+  renderDetail(); autoSave();
 }
 function rmKw(ki)     { S.categories[S.selCat].keywords.splice(ki, 1); renderDetail(); autoSave(); }
 function addKw() {
@@ -518,7 +598,7 @@ let _catDragEndedAt = 0;  // when the last real drag finished, see _catDragUp
 
 function catDragStart(event, idx) {
   if (event.button !== 0) return;           // left button only
-  if (event.target.closest('.cl-dot')) return;  // that's the enable toggle
+  if (event.target.closest('.cl-check')) return;  // that's the enable toggle
   _dragCat = {idx, startY: event.clientY, moved: false};
   document.addEventListener('mousemove', _catDragMove);
   document.addEventListener('mouseup',   _catDragUp);
@@ -565,16 +645,25 @@ function _catDragUp() {
   document.removeEventListener('mouseup',   _catDragUp);
   const didMove = !!(_dragCat && _dragCat.moved);
   _dragCat = null;
-  S.dragCat = -1;
-  if (didMove) {
-    // Letting go over a row would otherwise also count as a click on it.
-    // A timestamp rather than a one-shot capture listener: releasing
-    // outside the list produces no click at all, which left that listener
-    // armed indefinitely and eating some unrelated click much later.
-    _catDragEndedAt = Date.now();
-    autoSave();
+
+  if (!didMove) {
+    // Plain click, not a drag — and it is essential NOT to re-render here.
+    // The click event has not been dispatched yet at mouseup time. Replacing
+    // the list's DOM now destroys the row that was pressed, so the click has
+    // no surviving target and onclick="selCat(i)" never fires. That is what
+    // made selecting a category stop working entirely while the checkbox,
+    // which never arms these listeners, kept working.
+    return;
   }
+
+  S.dragCat = -1;
+  // Letting go over a row would otherwise also count as a click on it.
+  // A timestamp rather than a one-shot capture listener: releasing outside
+  // the list produces no click at all, which left that listener armed
+  // indefinitely and ate some unrelated click much later.
+  _catDragEndedAt = Date.now();
   renderDetail();
+  autoSave();
 }
 
 function _wasJustDragging() { return Date.now() - _catDragEndedAt < 250; }
@@ -697,7 +786,11 @@ function autoSave() {
       watch_folder:  S.watch_folder,
       output_folder: S.output_folder,
       group_by_cat:  S.group_by_cat,
-      delete_stems:  S.delete_stems,
+      // The UI asks "keep?", the config stores "delete?" — inverted here at
+      // the boundary so app.py, watcher.py and existing config.json files
+      // are untouched. The label is the honest one: off doesn't mean "do
+      // nothing", it means the stems are archived beside the AAF.
+      delete_stems:  !S.keep_stems,
       auto_convert:  S.auto_convert,
       launch_at_login: S.launch_at_login,
       categories:    S.categories,
@@ -788,7 +881,9 @@ class SettingsWindow:
             "watch_folder":    config.get("watch_folder")  or _default_folder,
             "output_folder":   config.get("output_folder") or _default_folder,
             "group_by_cat":    config.get("group_by_cat",    False),
-            "delete_stems":    config.get("delete_stems",    False),
+            # Presented to the UI the positive way round; see save() in the
+            # page script, which inverts it back on the way out.
+            "keep_stems":      not config.get("delete_stems", False),
             "auto_convert":    config.get("auto_convert",    False),
             "launch_at_login": config.get("launch_at_login", False),
             "categories":      cats,
@@ -807,7 +902,7 @@ class SettingsWindow:
 
         # WKWebView
         frame = NSMakeRect(0, 0, _W, _H)
-        webview = WKWebView.alloc().initWithFrame_configuration_(frame, wk_config)
+        webview = _WebView.alloc().initWithFrame_configuration_(frame, wk_config)
         webview.setValue_forKey_(False, "drawsBackground")
         self._webview = webview
 
@@ -818,7 +913,7 @@ class SettingsWindow:
 
         # NSPanel
         panel = _SettingsPanel.alloc().initWithContentRect_styleMask_backing_defer_(
-            frame, _TITLED | _CLOSABLE | _RESIZABLE | _NONACTIVATING,
+            frame, _TITLED | _CLOSABLE | _RESIZABLE,
             NSBackingStoreBuffered, False
         )
         panel.setTitle_("Stem2AAF Settings")
