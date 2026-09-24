@@ -270,8 +270,19 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
 .chip-x{width:14px;height:14px;border-radius:50%;background:var(--t3);border:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;padding:0;opacity:1;
   flex-shrink:0}
-.kw-chip.dragging{opacity:.4;cursor:grabbing}
+.kw-chip.dragging{opacity:.32;cursor:grabbing}
 .kw-chip{cursor:grab}
+/* The chip that follows the cursor, Finder-style. The original stays put
+   and dims, so you can see both where it came from and where it is going.
+   pointer-events:none is load-bearing: the drop target is found with
+   elementFromPoint, and a ghost under the cursor would hit-test as itself
+   and nothing would ever be droppable. Solid background because the chip's
+   own fill is translucent and would smear over whatever it passes. */
+.kw-ghost{position:fixed;z-index:999;pointer-events:none;margin:0;
+  background:var(--bg-el);border-color:var(--sep-s);
+  box-shadow:0 5px 16px rgba(0,0,0,.3);transform:scale(1.06);
+  opacity:.95;cursor:grabbing}
+.kw-ghost .chip-x{display:none}
 .cl-row.drag-over{background:rgba(0,122,255,.12)!important;border-bottom-color:rgba(0,122,255,.25)}
 .cd-add{display:flex;align-items:center;gap:7px;border-top:1px solid var(--sep);padding:10px 16px}
 .cd-input{flex:1;font-size:13px;font-family:var(--font);color:var(--t1);background:var(--bg-2);
@@ -688,16 +699,44 @@ function _catDragUp() {
 function _wasJustDragging() { return Date.now() - _catDragEndedAt < 250; }
 
 // ── Keyword drag-and-drop (mouse events — WKWebView safe) ────────────────────
+let _kwGhost = null;  // the chip copy that travels with the cursor
+
 function kwDragStart(event, catIdx, kwIdx) {
   if (event.target.closest('.chip-x')) return;
-  _dragKw = {catIdx, kwIdx};
-  event.currentTarget.classList.add('dragging');
+  const chip = event.currentTarget;
+  const box  = chip.getBoundingClientRect();
+  _dragKw = {
+    catIdx, kwIdx, chip, moved: false,
+    startX: event.clientX, startY: event.clientY,
+    // Where inside the chip it was grabbed, so the ghost stays under that
+    // same point rather than snapping its corner to the cursor.
+    grabX: event.clientX - box.left,
+    grabY: event.clientY - box.top,
+  };
   event.preventDefault();
   document.addEventListener('mousemove', _kwDragMove);
   document.addEventListener('mouseup',   _kwDragUp);
 }
 function _kwDragMove(event) {
   if (!_dragKw) return;
+
+  // Lift only past a few pixels, so a stray press on a chip doesn't flash
+  // a ghost for one frame.
+  if (!_dragKw.moved) {
+    const dx = event.clientX - _dragKw.startX, dy = event.clientY - _dragKw.startY;
+    if (dx * dx + dy * dy < 16) return;          // 4px
+    _dragKw.moved = true;
+    _dragKw.chip.classList.add('dragging');
+    _kwGhost = _dragKw.chip.cloneNode(true);
+    _kwGhost.className = 'kw-chip kw-ghost';     // drop 'dragging' from the copy
+    _kwGhost.removeAttribute('onmousedown');
+    _kwGhost.style.width = _dragKw.chip.getBoundingClientRect().width + 'px';
+    document.body.appendChild(_kwGhost);
+  }
+
+  _kwGhost.style.left = (event.clientX - _dragKw.grabX) + 'px';
+  _kwGhost.style.top  = (event.clientY - _dragKw.grabY) + 'px';
+
   document.querySelectorAll('.cl-row').forEach(r => r.classList.remove('drag-over'));
   const target = document.elementFromPoint(event.clientX, event.clientY);
   const row = target?.closest?.('[data-idx]');
@@ -706,9 +745,12 @@ function _kwDragMove(event) {
 function _kwDragUp(event) {
   document.removeEventListener('mousemove', _kwDragMove);
   document.removeEventListener('mouseup',   _kwDragUp);
+  _kwGhost?.remove();
+  _kwGhost = null;
   document.querySelectorAll('.kw-chip.dragging').forEach(c => c.classList.remove('dragging'));
   document.querySelectorAll('.cl-row.drag-over').forEach(r => r.classList.remove('drag-over'));
-  if (!_dragKw) return;
+  // Never moved: a press, not a drag. Nothing to drop.
+  if (!_dragKw || !_dragKw.moved) { _dragKw = null; return; }
   const target = document.elementFromPoint(event.clientX, event.clientY);
   const row = target?.closest?.('[data-idx]');
   if (row) {
