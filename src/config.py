@@ -11,7 +11,16 @@ import tempfile
 # the gap Bitwig leaves between finishing one track and creating the next
 # when a track carries a heavy plugin chain, so auto-convert could fire in
 # the middle of an export.
-AUTO_CONVERT_QUIET_SECONDS = 12
+#
+# 6 rather than 12: this window is dead time from the user's side. The
+# stems are already sitting in the folder and the menu-bar icon is showing
+# the "detected" blink, but nothing advances until it elapses, so every
+# second of it reads as the app being slow. 6 still clears the worst
+# inter-track gap above by roughly 3x, and a mistimed fire is not silent
+# corruption: the watcher refuses to build an AAF from a batch where any
+# file is still being written, so the failure mode is a visible error
+# rather than an AAF quietly missing tracks.
+AUTO_CONVERT_QUIET_SECONDS = 6
 
 CONFIG_DIR = os.path.expanduser("~/Library/Application Support/Stem2AAF")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.json")
