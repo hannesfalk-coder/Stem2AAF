@@ -248,7 +248,6 @@ html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);co
    scanning nine categories for the one or two that are switched off. */
 .cl-row.off .cl-name,.cl-row.active.off .cl-name{color:var(--off)}
 .cl-footer{padding:7px 10px;border-top:1px solid var(--sep);display:flex;gap:4px}
-.cl-ft-btn[disabled]{opacity:.35;cursor:default}
 .cl-ft-btn{width:26px;height:20px;background:var(--bg-2);border:1px solid var(--sep-s);
   border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;
   color:var(--t2);font-size:16px;line-height:1;font-family:var(--font);transition:all .1s}
@@ -541,8 +540,6 @@ function categoriesHTML() {
         <div class="cl-footer">
           <button class="cl-ft-btn" onclick="S.addingCat=true;renderDetail()" title="Add a category">+</button>
           <button class="cl-ft-btn danger" onclick="rmCat(${sel})" title="Remove this category">−</button>
-          <button class="cl-ft-btn" onclick="moveCat(-1)" title="Move up" ${sel<=0?'disabled':''} style="font-size:12px">↑</button>
-          <button class="cl-ft-btn" onclick="moveCat(1)" title="Move down" ${sel>=cats.length-1?'disabled':''} style="font-size:12px">↓</button>
           <button class="cl-ft-btn" onclick="resetAllCats()" title="Reset all categories to defaults" style="margin-left:auto;font-size:13px">↺</button>
         </div>
       </div>
@@ -609,19 +606,15 @@ function resetAllCats() {
   renderDetail(); autoSave();
 }
 
-// ── Category reordering ──────────────────────────────────────────────────────
+// ── Category reordering (drag a row) ─────────────────────────────────────────
 // Order matters to the converter twice over: it sets the order the groups
 // appear in the AAF, and it decides the winner when a filename matches
-// keywords from more than one category. There was no way to change it from
-// here at all, despite the config storing it and the converter reading it.
-
-function moveCat(delta) {
-  const from = S.selCat, to = from + delta;
-  if (to < 0 || to >= S.categories.length) return;
-  S.categories.splice(to, 0, S.categories.splice(from, 1)[0]);
-  S.selCat = to;
-  renderDetail(); autoSave();
-}
+// keywords from more than one category.
+//
+// Dragging is the only way to reorder now. There were also up/down buttons
+// in the footer, added when there was no way at all; once dragging worked
+// they were a second route to the same result, taking two of the five
+// footer slots to do what the list already does directly.
 
 let _dragCat = null;      // {idx, startY, moved}
 let _catDragEndedAt = 0;  // when the last real drag finished, see _catDragUp
