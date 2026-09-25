@@ -55,6 +55,13 @@ DATA_FILES = [(
         # second full .app, built by its own py2app run, that existed only
         # to show one dialog and delete two folders at a cost of ~20 MB.
         "src/assets/uninstall.sh",
+        # The settings page. Split out of settings_window.py so the editor
+        # and the linters can see it; _read_page() finds these three here in
+        # Contents/Resources and inlines them into one document at runtime.
+        # If they are missing from this list the Settings window opens blank.
+        "src/web/settings.html",
+        "src/web/settings.css",
+        "src/web/settings.js",
     ],
 )]
 OPTIONS = {

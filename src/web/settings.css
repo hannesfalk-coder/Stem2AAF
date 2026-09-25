@@ -1,0 +1,254 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#FFFFFF;--bg-2:#F2F2F7;--bg-3:#E5E5EA;--bg-el:#FFFFFF;
+  --sidebar:#EBEBF0;--t1:#000000;--t2:#6C6C70;--t3:#AEAEB2;
+  /* Disabled-category outline and label. Separate from --t3 because --t3 is a
+     placeholder grey that goes very dark in dark mode, where an off checkbox
+     still has to be clearly visible as an empty box rather than fade out. */
+  --off:#AEAEB2;
+  --green:#34C759;--red:#FF3B30;
+  --sep:rgba(0,0,0,.09);--sep-s:rgba(0,0,0,.16);
+  --chip-bg:rgba(0,0,0,.055);--chip-b:rgba(0,0,0,.11);
+  --tog-off:#D1D1D6;
+  --font:-apple-system,BlinkMacSystemFont,'SF Pro Text',system-ui,sans-serif;
+  --font-d:-apple-system,BlinkMacSystemFont,'SF Pro Display',system-ui,sans-serif;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#1C1C1E;--bg-2:#2C2C2E;--bg-3:#3A3A3C;--bg-el:#2C2C2E;
+  --sidebar:#252527;--t1:#FFFFFF;--t2:#8E8E93;--t3:#48484A;
+  --off:#7C7C82;
+  --sep:rgba(255,255,255,.09);--sep-s:rgba(255,255,255,.16);
+  --chip-bg:rgba(255,255,255,.08);--chip-b:rgba(255,255,255,.13);
+  --tog-off:#3A3A3C;
+}}
+html,body{width:100%;height:100%;font-family:var(--font);background:var(--bg);color:var(--t1);
+  -webkit-font-smoothing:antialiased;-webkit-user-select:none;user-select:none}
+
+/* ── Layout ── */
+.win-body{display:flex;height:100vh}
+
+
+/* ── Sidebar ── */
+.sidebar{width:182px;flex-shrink:0;background:var(--sidebar);border-right:1px solid var(--sep-s);
+  display:flex;flex-direction:column;padding:8px 0 12px;overflow-y:auto}
+.sb-group-label{font-size:10px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--t3);padding:8px 14px 4px}
+.sb-row{display:flex;align-items:center;gap:9px;padding:6px 10px 6px 12px;cursor:pointer;
+  margin:0 4px;border-radius:7px;transition:background .08s;border:1px solid transparent}
+.sb-row:hover{background:var(--chip-bg)}
+.sb-row.active{background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.18)}
+/* SF Symbols-style glyphs rather than emoji. Emoji arrive at different
+   weights, colours and optical sizes, so the column reads as ragged and
+   the set can never be completed consistently - there was no emoji for
+   "How to Use", which is why that one was a hand-built span. These are
+   one stroke weight, one size, and take their colour from the row. The
+   22px box is kept so the layout is unchanged; only its fill is gone. */
+.sb-icon{width:22px;height:22px;display:flex;align-items:center;
+  justify-content:center;flex-shrink:0;background:none;color:var(--t2)}
+.sb-icon svg{display:block}
+.sb-row.active .sb-icon{color:var(--t1)}
+.sb-name{font-size:13px;font-weight:500;color:var(--t1)}
+.change-btn.danger{color:var(--red)}
+.sb-row.active .sb-name{color:var(--t1)}
+
+/* ── Detail pane ── */
+.detail{flex:1;overflow-y:auto;padding:20px}
+.sec-label{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--t3);margin-bottom:8px;margin-top:20px}
+.sec-label:first-child{margin-top:0}
+
+/* ── Settings group / row ── */
+.sg{background:var(--bg-el);border-radius:10px;border:1px solid var(--sep);overflow:hidden;margin-bottom:8px}
+.sr{display:flex;align-items:center;gap:14px;padding:0 16px;min-height:52px}
+.sr+.sr{border-top:1px solid var(--sep)}
+.sr-text{display:flex;flex-direction:column;gap:1px;flex:1;min-width:0}
+.sr-title{font-size:13px;font-weight:500;color:var(--t1)}
+.sr-value{font-size:11px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:350px}
+.sr-desc{font-size:12px;color:var(--t2);line-height:1.4;margin-top:1px}
+
+/* Change button */
+.change-btn{flex-shrink:0;padding:4px 12px;background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.18);
+  border-radius:6px;font-size:12px;font-family:var(--font);color:var(--t1);cursor:pointer;white-space:nowrap}
+.change-btn:hover{background:var(--bg-3)}
+.change-btn:active{transform:scale(.97)}
+
+/* Toggle */
+.sr-toggle{flex-direction:row;padding:13px 16px;gap:14px;cursor:default;align-items:flex-start}
+.sr-toggle .sr-text{padding-top:1px}
+.tog{width:44px;height:26px;border-radius:13px;background:var(--tog-off);position:relative;
+  border:none;outline:none;cursor:pointer;flex-shrink:0;transition:background .18s}
+.tog.on{background:var(--green)}
+.tog::after{content:'';position:absolute;top:3px;left:3px;width:20px;height:20px;
+  border-radius:50%;background:white;box-shadow:0 1px 4px rgba(0,0,0,.25);
+  transition:transform .2s cubic-bezier(.35,0,.25,1)}
+.tog.on::after{transform:translateX(18px)}
+
+/* ── Categories section ── */
+/* flex:1 rather than height:100%. At 100% it claimed the detail pane's
+   full content box while the CATEGORY KEYWORDS label sat above it, so the
+   two together always overflowed by the height of that label and put a
+   scrollbar on a pane whose columns already scroll internally. */
+.cat-split{display:flex;gap:0;flex:1;min-height:340px}
+.detail.split-mode{display:flex;flex-direction:column}
+/* Column headers. One "Category Keywords" label named the pair but sat
+   over only the left column, so "Keywords" pointed at nothing. Split in
+   two, each word sits over the column it names. The widths mirror
+   .cat-list-pane and .cat-detail-pane's margin so they stay aligned. */
+.cat-heads{display:flex;flex-shrink:0}
+.cat-heads .h-cat{width:176px;flex-shrink:0}
+.cat-heads .h-kw{flex:1;margin-left:10px}
+.cat-heads .sec-label{margin:0 0 8px}
+
+/* ── Presets ──
+   A preset is the whole category list: names, order, enabled state and
+   keywords. Deliberately NOT the folders or the conversion toggles -
+   those describe this machine, the categories describe the kind of
+   project. A preset that silently re-pointed the output folder would be
+   a nasty surprise.
+   The control sits directly above the two panes because that is what
+   says what it governs: everything below it, nothing else. */
+.preset-row{display:flex;align-items:center;gap:9px;margin-bottom:14px;
+  position:relative;flex-shrink:0}
+.preset-lab{font-size:12px;color:var(--t2);flex-shrink:0}
+.preset-pop{width:252px;display:flex;align-items:center;justify-content:space-between;
+  gap:8px;background:var(--bg-el);border:1px solid var(--sep-s);border-radius:7px;
+  padding:5px 9px;font-size:13px;font-family:var(--font);color:var(--t1);
+  cursor:pointer;text-align:left;box-shadow:0 1px 1.5px rgba(0,0,0,.05)}
+.preset-pop:hover{background:var(--bg-2)}
+/* The word that makes presets trustworthy: your edits are live but not
+   saved, and Save is suddenly the interesting menu item. */
+.preset-mod{color:var(--t3)}
+.preset-chev{display:flex;flex-direction:column;gap:2px;opacity:.5;flex-shrink:0}
+.preset-chev i{border-left:3.5px solid transparent;border-right:3.5px solid transparent;display:block}
+.preset-chev i:first-child{border-bottom:4px solid currentColor}
+.preset-chev i:last-child{border-top:4px solid currentColor}
+.preset-menu{position:absolute;top:calc(100% + 3px);left:58px;z-index:60;min-width:252px;
+  background:var(--bg-el);border:1px solid var(--sep-s);border-radius:8px;padding:4px;
+  box-shadow:0 10px 28px rgba(0,0,0,.28)}
+.pm-item{display:flex;align-items:center;gap:7px;padding:5px 9px;border-radius:5px;
+  font-size:13px;color:var(--t1);cursor:pointer;white-space:nowrap}
+.pm-item:hover{background:var(--chip-bg)}
+.pm-item.dim{color:var(--t3);cursor:default}
+.pm-item.dim:hover{background:none}
+.pm-tick{width:11px;flex-shrink:0;font-size:10px;color:var(--t2)}
+.pm-sep{height:1px;background:var(--sep);margin:4px 6px}
+.preset-input{width:252px;font-size:13px;font-family:var(--font);color:var(--t1);
+  background:var(--bg-el);border:1px solid var(--sep-s);border-radius:7px;
+  padding:5px 9px;outline:none;-webkit-user-select:auto;user-select:auto}
+.cat-list-pane{width:176px;flex-shrink:0;background:var(--bg-el);border:1px solid var(--sep);
+  border-radius:10px;overflow:hidden;display:flex;flex-direction:column}
+.cat-list-inner{flex:1;overflow-y:auto}
+.cl-row{display:flex;align-items:center;gap:8px;padding:8px 10px;cursor:pointer;
+  transition:background .08s;border-bottom:1px solid var(--sep)}
+.cl-row:last-child{border-bottom:none}
+.cl-row:hover{background:var(--chip-bg)}
+.cl-row.active{background:rgba(0,0,0,.06)}
+/* Category order is not cosmetic: it decides the order the groups appear
+   in the AAF, and it breaks ties when a filename matches keywords from
+   two categories. Rows are draggable, with the footer arrows as the
+   discoverable, always-works alternative. */
+.cl-row{cursor:grab}
+.cl-row.dragging{opacity:.5;cursor:grabbing;background:rgba(0,122,255,.10)}
+/* 9px is what you see, but a 9px click target is far too small to hit. The
+   transparent border grows the hit area to 23px while background-clip keeps
+   the paint at 9px, and the negative margin cancels the layout effect — so
+   it looks identical and is ~6x easier to click. */
+/* Calendar.app's sidebar pattern: the checkbox IS the colour swatch. Filled
+   orange with a tick while the category is matching, hollow outline when it
+   isn't — so the state differs by SHAPE as well as hue and stays readable in
+   greyscale or with colour-vision deficiency, which a bare dot did not. */
+.cl-check{position:relative;width:15px;height:15px;border-radius:4px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  background:#FF9500;border:1.5px solid transparent;
+  transition:background .12s,border-color .12s}
+/* Transparent overlay widens the click target without moving anything.
+   Generous vertically (nothing else shares the row's height), but tight
+   horizontally — every pixel it takes sideways is a pixel of the row that
+   toggles instead of selecting, which is the wrong gesture. */
+.cl-check::before{content:'';position:absolute;inset:-6px -3px}
+.cl-check:hover{opacity:.75}
+.cl-check svg{display:block}
+.cl-check.off{background:transparent;border-color:var(--off)}
+.cl-check.off svg{display:none}
+.cl-name{flex:1;font-size:13px;font-weight:500;color:var(--t1)}
+.cl-row.active .cl-name{color:var(--t1)}
+/* State reads from the whole row, not just the 15px box — matters when
+   scanning nine categories for the one or two that are switched off. */
+.cl-row.off .cl-name,.cl-row.active.off .cl-name{color:var(--off)}
+.cl-footer{padding:7px 10px;border-top:1px solid var(--sep);display:flex;gap:4px}
+.cl-ft-btn{width:26px;height:20px;background:var(--bg-2);border:1px solid var(--sep-s);
+  border-radius:4px;display:flex;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--t2);font-size:16px;line-height:1;font-family:var(--font);transition:all .1s}
+.cl-ft-btn:hover{background:var(--bg-3)}
+.cl-ft-btn.danger:hover{background:rgba(255,59,48,.1);color:var(--red);border-color:rgba(255,59,48,.25)}
+.cl-add-row{padding:5px 8px}
+.cl-add-input{width:100%;font-size:12px;font-family:var(--font);color:var(--t1);
+  background:var(--bg-el);border:1px solid var(--sep-s);border-radius:5px;padding:3px 7px;outline:none}
+.cl-add-input::placeholder{color:var(--t3)}
+.cat-detail-pane{flex:1;background:var(--bg-el);border:1px solid var(--sep);border-radius:10px;
+  overflow:hidden;display:flex;flex-direction:column;margin-left:10px}
+.cd-header{padding:14px 16px 10px;border-bottom:1px solid var(--sep)}
+.cd-name{font-size:15px;font-weight:700;letter-spacing:-.2px}
+.cd-meta{font-size:12px;color:var(--t2);margin-top:2px}
+.cd-body{flex:1;overflow-y:auto;padding:12px 16px;display:flex;flex-wrap:wrap;
+  align-content:flex-start;gap:6px}
+.kw-chip{display:flex;align-items:center;gap:3px;padding:2px 8px;background:var(--chip-bg);
+  border:1px solid var(--chip-b);border-radius:10px;font-size:11px;color:var(--t1)}
+.chip-x{width:14px;height:14px;border-radius:50%;background:var(--t3);border:none;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;opacity:1;
+  flex-shrink:0}
+.kw-chip.dragging{opacity:.32;cursor:grabbing}
+.kw-chip{cursor:grab}
+/* The chip that follows the cursor, Finder-style. The original stays put
+   and dims, so you can see both where it came from and where it is going.
+   pointer-events:none is load-bearing: the drop target is found with
+   elementFromPoint, and a ghost under the cursor would hit-test as itself
+   and nothing would ever be droppable. Solid background because the chip's
+   own fill is translucent and would smear over whatever it passes. */
+.kw-ghost{position:fixed;z-index:999;pointer-events:none;margin:0;
+  background:var(--bg-el);border-color:var(--sep-s);
+  box-shadow:0 5px 16px rgba(0,0,0,.3);transform:scale(1.06);
+  opacity:.95;cursor:grabbing}
+.kw-ghost .chip-x{display:none}
+.cl-row.drag-over{background:rgba(0,122,255,.12)!important;border-bottom-color:rgba(0,122,255,.25)}
+.cd-add{display:flex;align-items:center;gap:7px;border-top:1px solid var(--sep);padding:10px 16px}
+.cd-input{flex:1;font-size:13px;font-family:var(--font);color:var(--t1);background:var(--bg-2);
+  border:1px solid var(--sep-s);border-radius:7px;padding:6px 10px;outline:none;
+  -webkit-user-select:auto;user-select:auto}
+.cd-input:focus{border-color:var(--sep-s);box-shadow:none}
+.cd-input::placeholder{color:var(--t3)}
+.cd-add-btn{padding:6px 14px;background:rgba(0,0,0,.06);color:var(--t1);
+  border:1px solid rgba(0,0,0,.18);border-radius:7px;
+  font-size:13px;font-weight:500;font-family:var(--font);cursor:pointer}
+.cd-add-btn:hover{background:var(--bg-3)}
+.cd-add-btn:active{transform:scale(.97)}
+
+/* ── Help section ── */
+.help-step{display:flex;gap:16px;padding:18px 20px;border-bottom:1px solid var(--sep)}
+.help-step:last-child{border-bottom:none}
+.step-num{width:28px;height:28px;border-radius:50%;background:var(--bg-3);color:var(--t2);font-size:13px;
+  font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-body{flex:1}
+.step-title{font-size:13px;font-weight:600;color:var(--t1);margin-bottom:3px}
+.step-desc{font-size:12px;color:var(--t2);line-height:1.55}
+.step-tag{display:inline-flex;align-items:center;gap:4px;margin-top:6px;padding:2px 8px;
+  background:var(--chip-bg);border:1px solid var(--chip-b);border-radius:5px;font-size:11px;color:var(--t2)}
+.help-tip{margin:16px 0 0;padding:12px 14px;background:var(--bg-2);
+  border:1px solid var(--sep);border-radius:9px}
+.help-tip-title{font-size:12px;font-weight:600;color:var(--t2);margin-bottom:3px}
+.help-tip-body{font-size:12px;color:var(--t2);line-height:1.55}
+.help-tip.key{border-color:rgba(255,149,0,.45);background:rgba(255,149,0,.07)}
+.help-tip.key .help-tip-title{color:var(--t1)}
+
+/* ── About section ── */
+.about-wrap{display:flex;flex-direction:column;align-items:center;padding:32px 20px;text-align:center}
+.app-icon{width:80px;height:80px;background:#FF9500;border-radius:18px;display:flex;
+  align-items:center;justify-content:center;margin-bottom:14px;
+  box-shadow:0 4px 16px rgba(255,149,0,.35)}
+.app-name{font-size:19px;font-weight:700;letter-spacing:-.3px;margin-bottom:4px}
+.app-ver{font-size:13px;color:var(--t2);margin-bottom:16px}
+.app-desc{font-size:13px;color:var(--t2);line-height:1.6;max-width:300px;margin-bottom:24px}
+.about-links{display:flex;gap:8px;justify-content:center}
+.about-link{padding:6px 14px;background:var(--bg-2);border:1px solid var(--sep-s);border-radius:7px;
+  font-size:13px;color:var(--t2);font-family:var(--font);cursor:pointer;text-decoration:none}
+.about-link:hover{background:var(--bg-3)}
