@@ -1176,6 +1176,15 @@ class SettingsWindow:
         webview.setAutoresizingMask_(2 | 16)  # NSViewWidthSizable | NSViewHeightSizable
         panel.setContentView_(webview)
         panel.setReleasedWhenClosed_(False)
+        # NSPanel defaults hidesOnDeactivate to YES, because a panel is meant
+        # to be a floating tool palette - you do not want one hovering over
+        # another app when you switch away. A Settings window is not that: it
+        # vanished the moment you clicked another app and, in an accessory
+        # app with no normal activation path back, never reappeared, so it
+        # read as having closed itself. NSWindow, which Apple's own settings
+        # windows use, defaults this to NO; this makes the panel behave the
+        # same.
+        panel.setHidesOnDeactivate_(False)
         panel.center()
         self._panel = panel
 
