@@ -69,7 +69,7 @@ def load() -> dict:
         save(DEFAULTS)
         return dict(DEFAULTS)
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(CONFIG_PATH) as f:
             data = json.load(f)
         merged = dict(DEFAULTS)
         merged.update(data)

@@ -28,7 +28,7 @@ from AppKit import NSBundle
 
 import config
 from config import AUTO_CONVERT_QUIET_SECONDS
-from settings_window import SettingsWindow, DEFAULT_CATEGORIES
+from settings_window import DEFAULT_CATEGORIES, SettingsWindow
 from watcher import Watcher
 
 LOG_FILENAME = "Stem2AAF_log.txt"
@@ -93,7 +93,6 @@ def _ensure_single_instance():
     macOS normally handles this for signed apps, but unsigned py2app builds
     can launch a second instance instead of focusing the existing one.
     """
-    import subprocess
     from AppKit import NSRunningApplication
     running = NSRunningApplication.runningApplicationsWithBundleIdentifier_(BUNDLE_ID)
     # Filter out this process itself

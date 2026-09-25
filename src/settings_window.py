@@ -81,8 +81,10 @@ class _WebView(WKWebView):
 # The window is resizable as well, so this only has to be a good default.
 _W, _H = 720, 790
 
-from config import AUTO_CONVERT_QUIET_SECONDS
-from version import VERSION, BUILD
+# Imported here rather than at the very top so the window-size block above
+# stays one readable unit with its measurements.
+from config import AUTO_CONVERT_QUIET_SECONDS  # noqa: E402
+from version import BUILD, VERSION  # noqa: E402
 
 # Single source of truth: the converter's keyword table is what actually runs
 # at conversion time, so the UI derives its defaults from it rather than
@@ -1239,11 +1241,10 @@ class SettingsWindow:
             # Live apply — the panel stays open; the close button dismisses it.
             self._on_save(config)
 
-        elif action == "uninstall":
-            # Handed back to the app, which owns the confirmation dialog
-            # and the bundled uninstall script.
-            if self._on_uninstall is not None:
-                self._on_uninstall()
+        # Handed back to the app, which owns the confirmation dialog and the
+        # bundled uninstall script.
+        elif action == "uninstall" and self._on_uninstall is not None:
+            self._on_uninstall()
 
     def _open_folder(self, key: str):
         panel = NSOpenPanel.openPanel()

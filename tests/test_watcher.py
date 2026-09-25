@@ -143,14 +143,27 @@ class SettleBehaviour(unittest.TestCase):
 class OutputFolder(unittest.TestCase):
     def test_versions_increment_per_project(self):
         with tempfile.TemporaryDirectory() as d:
-            watch = os.path.join(d, "The Sun")
-            os.makedirs(watch)
-            d1, v1, name = _next_conversion_dir(watch, watch)
-            d2, v2, _ = _next_conversion_dir(watch, watch)
+            out = os.path.join(d, "The Sun")
+            os.makedirs(out)
+            d1, v1, name = _next_conversion_dir(out)
+            d2, v2, _ = _next_conversion_dir(out)
             self.assertEqual(name, "The Sun")
             self.assertEqual((v1, v2), (1, 2))
             self.assertTrue(d1.endswith("The Sun Converted v1"))
             self.assertTrue(d2.endswith("The Sun Converted v2"))
+
+    def test_project_name_comes_from_the_output_folder(self):
+        """
+        The watch folder is fixed - the DAW keeps exporting to the same
+        place - so the output folder is the per-project one and is what
+        names the conversion. Naming after the watch folder meant every
+        project came out called after the inbox.
+        """
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "Midnight Drive")
+            os.makedirs(out)
+            _, _, name = _next_conversion_dir(out)
+            self.assertEqual(name, "Midnight Drive")
 
     def test_output_can_live_outside_the_watched_folder(self):
         with tempfile.TemporaryDirectory() as d:

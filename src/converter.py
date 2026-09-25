@@ -214,7 +214,9 @@ def _validate_aaf(path: str, expected_track_count: int) -> None:
     except ConversionError:
         raise
     except Exception as e:  # noqa: BLE001 - any failure to re-open means the file is suspect
-        raise ConversionError(f"Validation failed: the written AAF could not be re-opened ({e}).")
+        raise ConversionError(
+            f"Validation failed: the written AAF could not be re-opened ({e})."
+        ) from e
 
 
 # Frames per block when transcoding. 65536 frames is about 1.4 seconds of
@@ -336,7 +338,9 @@ def stems_to_aaf(
         try:
             infos[p] = sf.info(p)
         except Exception as e:  # noqa: BLE001
-            raise ConversionError(f"Couldn't read '{os.path.basename(p)}' as audio: {e}")
+            raise ConversionError(
+                f"Couldn't read '{os.path.basename(p)}' as audio: {e}"
+            ) from e
 
     rate_counts: dict[int, int] = {}
     for info in infos.values():

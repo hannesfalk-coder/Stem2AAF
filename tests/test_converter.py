@@ -202,9 +202,8 @@ class Conversion(unittest.TestCase):
             self.assertFalse(os.path.exists(out))
 
     def test_empty_batch_is_rejected(self):
-        with tempfile.TemporaryDirectory() as d:
-            with self.assertRaises(ConversionError):
-                stems_to_aaf([], os.path.join(d, "out.aaf"))
+        with tempfile.TemporaryDirectory() as d, self.assertRaises(ConversionError):
+            stems_to_aaf([], os.path.join(d, "out.aaf"))
 
     def test_non_audio_extension_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
@@ -244,7 +243,7 @@ class Conversion(unittest.TestCase):
             for n in ("01 Kick.wav", "02 Reese Bass.wav", "03 Lead Vocal.wav"):
                 write_stem(os.path.join(d, n))
             paths = sorted(os.path.join(d, n) for n in os.listdir(d) if n.endswith(".wav"))
-            custom = {name: kws for name, kws in _CATEGORY_KEYWORDS}
+            custom = dict(_CATEGORY_KEYWORDS)
             default = [{"name": n, "enabled": True} for n, _ in _CATEGORY_KEYWORDS]
 
             out = os.path.join(d, "a.aaf")
@@ -271,7 +270,7 @@ class Conversion(unittest.TestCase):
             for n in ("01 Kick.wav", "02 Reese Bass.wav"):
                 write_stem(os.path.join(d, n))
             paths = sorted(os.path.join(d, n) for n in os.listdir(d) if n.endswith(".wav"))
-            custom = {name: kws for name, kws in _CATEGORY_KEYWORDS}
+            custom = dict(_CATEGORY_KEYWORDS)
             order = [{"name": n, "enabled": n != "Bass"} for n, _ in _CATEGORY_KEYWORDS]
             out = os.path.join(d, "c.aaf")
             stems_to_aaf(paths, out, group_by_category=True,

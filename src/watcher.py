@@ -9,7 +9,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 import config
-from converter import stems_to_aaf, ConversionError, _sanitize_name
+from converter import ConversionError, _sanitize_name, stems_to_aaf
 
 # Bitwig writes each stem file in one go, but we still wait for the file
 # size to stop changing before touching it, in case of a slow disk /
@@ -215,8 +215,8 @@ class StemsBatchHandler(FileSystemEventHandler):
         problems dict as a hard failure - see _convert_batch.
         """
         pending = list(batch)
-        last_sizes = {p: -1 for p in pending}
-        reasons = {p: "still being written" for p in pending}
+        last_sizes = dict.fromkeys(pending, -1)
+        reasons = dict.fromkeys(pending, "still being written")
         settled: list[str] = []
 
         for _ in range(SETTLE_MAX_PASSES):

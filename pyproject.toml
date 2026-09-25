@@ -1,0 +1,44 @@
+# Tooling config only. The app is built by setup.py (py2app) and is not a
+# pip-installable package, so there is deliberately no [project] table here.
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"          # the Python the .app bundles
+src = ["src", "tests"]
+exclude = ["venv", "build", "dist"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes - real bugs: unused names, undefined names
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "UP",   # pyupgrade
+    "B",    # bugbear - likely mistakes
+    "C4",   # comprehension simplifications
+    "SIM",  # simplifications
+]
+ignore = [
+    # This codebase explains itself in prose comments, and reflowing those to
+    # fit a column limit makes them harder to read, not easier. Code lines are
+    # kept short by hand; it is the commentary that runs long.
+    "E501",
+    # Swallowing an exception around an AppKit call that may legitimately fail
+    # is deliberate here and reads more clearly as try/except/pass than as
+    # contextlib.suppress, which hides that a failure is expected.
+    "SIM105",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "config", "converter", "settings_window", "watcher", "version"]
+
+[tool.ruff.lint.per-file-ignores]
+# setup.py does sys.path.insert(0, "src") and then imports from it, so the
+# import order is load-bearing: sorting it moves the import above the path
+# setup and the build fails outright. This is the one place the linter must
+# not be obeyed.
+"setup.py" = ["E402", "I001"]
+# The tests do the same: sys.path.insert(0, "../src") and then import from
+# it. They already carry noqa: E402 per line; I001 is the same constraint
+# applied to the block as a whole.
+"tests/*.py" = ["E402", "I001"]
