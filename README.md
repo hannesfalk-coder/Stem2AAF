@@ -1,8 +1,9 @@
 # Stem2AAF
 
 A macOS menu-bar app that watches a folder for stem exports from your DAW
-and compiles them into a single `.aaf` file for DaVinci Resolve, Pro Tools,
-Avid Media Composer, or any other post-production software.
+and compiles them into a single `.aaf` file — the interchange format
+Pro Tools, Media Composer, DaVinci Resolve, Premiere Pro, Audition,
+Logic Pro, Nuendo, Cubase Pro and Studio One all import.
 
 Built around Bitwig Studio's `File → Export Audio…`, but it works with any
 DAW that writes one WAV per track.
@@ -15,7 +16,8 @@ DAW that writes one WAV per track.
 
 You export stems. Stem2AAF notices them land, reads every filename, sorts
 the tracks into categories, and hands you one AAF with every track named,
-grouped and in sync. You import one file instead of forty.
+grouped and in sync. One file instead of many, ready for whatever software
+comes next.
 
 It can't hook directly into your DAW's Export button — Bitwig has no plugin
 API for that, and neither do most DAWs. So it watches a folder instead, and
